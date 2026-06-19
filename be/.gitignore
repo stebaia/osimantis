@@ -1,0 +1,7 @@
+/server
+/docs
+*.exe
+
+# Segreti locali: usare .env.example come modello
+.env
+.DS_Store

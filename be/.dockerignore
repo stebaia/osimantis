@@ -1,0 +1,22 @@
+# Controllo versione
+.git
+.gitignore
+
+# Segreti e config locale
+.env
+.env.*
+!.env.example
+
+# Binari compilati localmente (es. ./server da go build)
+/server
+*.exe
+
+# File temporanei / OS
+*.tmp
+*.log
+.DS_Store
+
+# Docker stesso (non serve nel build context dell'immagine app)
+Dockerfile
+docker-compose.yml
+.dockerignore

@@ -1,0 +1,56 @@
+# Compose per il deploy su Coolify (PaaS self-hosted sulla VPS).
+#
+# Differenze rispetto a docker-compose.yml (sviluppo locale):
+#  - L'app NON pubblica porte sull'host: il reverse proxy di Coolify (Traefik)
+#    espone il servizio su HTTPS in automatico. La porta interna 8080 viene
+#    rilevata da Coolify tramite la variabile magica SERVICE_FQDN_APP_8080.
+#  - Il DB NON pubblica la 5432 sull'host: resta raggiungibile solo dalla rete
+#    interna del progetto (l'app la vede come host "db").
+#  - I segreti (password, chiavi, token) si impostano nella UI di Coolify, non in
+#    un file .env committato. Le variabili SERVICE_* le genera Coolify.
+#
+# In Coolify: New Resource → Docker Compose → incolla/seleziona questo file.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applicato SOLO al primo avvio, quando il volume pgdata è vuoto.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # SERVICE_FQDN_APP_8080: Coolify la valorizza con l'FQDN pubblico e
+      # configura il proxy + TLS verso la porta 8080 del container.
+      - SERVICE_FQDN_APP_8080
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - API_TOKEN=${API_TOKEN}
+      - PORT=8080
+    healthcheck:
+      # Il binario è distroless (niente shell/curl): usiamo wget? No, neanche
+      # quello c'è. Coolify accetta un container senza healthcheck interno e si
+      # basa sullo stato del processo + sul proxy. Lasciamo che sia /health a
+      # essere verificato dall'esterno dopo il deploy.
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  pgdata:
