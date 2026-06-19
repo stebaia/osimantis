@@ -1,10 +1,18 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 )
+
+// requestCtx deriva dal context della richiesta un context con timeout, da usare
+// negli handler. Centralizza il pattern ripetuto context.WithTimeout(r.Context()).
+func requestCtx(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), d)
+}
 
 // writeJSON serializza v come JSON con lo status dato e il Content-Type corretto.
 func writeJSON(w http.ResponseWriter, status int, v any) {

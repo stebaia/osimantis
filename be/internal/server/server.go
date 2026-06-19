@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"relazioni-server/internal/agent"
@@ -50,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /chat", s.handleChat)
 	mux.HandleFunc("GET /graph", s.handleGraph)
+	mux.HandleFunc("GET /wiki", s.handleWikiList)
+	mux.HandleFunc("GET /wiki/{id}", s.handleWikiPage)
 	return logging(auth(s.apiToken)(mux))
 }
 
@@ -120,4 +124,43 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, graph)
+}
+
+// handleWikiList restituisce l'elenco delle persone (per il frontend). È una
+// vista calcolata sul DB, non salva nulla.
+func (s *Server) handleWikiList(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := requestCtx(r, 10*time.Second)
+	defer cancel()
+
+	people, err := tools.WikiList(ctx, s.pool)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "lettura elenco fallita")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"people": people})
+}
+
+// handleWikiPage restituisce la scheda di una persona (dati, legami, eventi
+// recenti) come JSON, dato il suo id. La presentazione la fa il frontend.
+func (s *Server) handleWikiPage(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id non valido")
+		return
+	}
+
+	ctx, cancel := requestCtx(r, 10*time.Second)
+	defer cancel()
+
+	page, err := tools.WikiPage(ctx, s.pool, id)
+	if errors.Is(err, tools.ErrNodeNotFound) {
+		writeError(w, http.StatusNotFound, "persona non trovata")
+		return
+	}
+	if err != nil {
+		slog.Error("wiki page", "id", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "generazione scheda fallita")
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
