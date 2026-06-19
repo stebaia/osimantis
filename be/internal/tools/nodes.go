@@ -116,6 +116,8 @@ RETURNING id, type, name, aliases, data`
 		if err != nil {
 			return nil, fmt.Errorf("upsert update: %w", err)
 		}
+		_ = LogActivity(ctx, pool, nodeType+"_updated", "node", node.ID, ActorAgent,
+			"Aggiornato/a "+node.Name, nil)
 		return node, nil
 	}
 
@@ -133,6 +135,8 @@ RETURNING id, type, name, aliases, data`
 	if err != nil {
 		return nil, fmt.Errorf("upsert insert: %w", err)
 	}
+	_ = LogActivity(ctx, pool, nodeType+"_created", "node", node.ID, ActorAgent,
+		"Creato/a "+node.Name, nil)
 	return node, nil
 }
 
@@ -189,5 +193,7 @@ RETURNING id, from_id, to_id, type, weight, last_seen, data`
 	if err != nil {
 		return nil, fmt.Errorf("link_nodes: %w", err)
 	}
+	_ = LogActivity(ctx, pool, "link_created", "edge", edge.ID, ActorAgent,
+		fmt.Sprintf("Creato legame %q", edge.Type), nil)
 	return edge, nil
 }

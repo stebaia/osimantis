@@ -54,6 +54,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /graph", s.handleGraph)
 	mux.HandleFunc("GET /wiki", s.handleWikiList)
 	mux.HandleFunc("GET /wiki/{id}", s.handleWikiPage)
+
+	// API REST per il frontend: ricerca/CRUD persone e legami, feed cronologico.
+	mux.HandleFunc("GET /people", s.handleSearchPeople)
+	mux.HandleFunc("POST /people", s.handleCreatePerson)
+	mux.HandleFunc("GET /people/{id}", s.handlePersonDetail)
+	mux.HandleFunc("PATCH /people/{id}", s.handleUpdatePerson)
+	mux.HandleFunc("POST /links", s.handleCreateLink)
+	mux.HandleFunc("DELETE /links/{id}", s.handleDeleteLink)
+	mux.HandleFunc("GET /feed", s.handleFeed)
+
 	return logging(auth(s.apiToken)(mux))
 }
 

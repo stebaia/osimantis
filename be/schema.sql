@@ -105,3 +105,28 @@ CREATE TABLE IF NOT EXISTS event_participants (
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_participants_node ON event_participants (node_id);
+
+-- ----------------------------------------------------------------------------
+-- ACTIVITY_LOG — changelog di tutto ciò che cambia nel grafo ("storytime").
+-- ----------------------------------------------------------------------------
+-- Registra ogni scrittura, sia manuale (REST) sia fatta dall'agente LLM (tool),
+-- così il feed cronologico è completo. È un log append-only: non si aggiorna né
+-- si cancella riga per riga.
+-- action: verbo dell'attività (es. 'person_created', 'person_updated',
+--         'link_created', 'link_deleted', 'event_added').
+-- entity_type/entity_id: a cosa si riferisce (node/edge/event + id).
+-- actor: chi l'ha fatto ('user' = manuale dal FE, 'agent' = LLM via chat).
+-- summary: descrizione leggibile, pronta da mostrare nel feed.
+-- data: dettagli strutturati liberi (es. campi cambiati).
+CREATE TABLE IF NOT EXISTS activity_log (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    action      TEXT        NOT NULL,
+    entity_type TEXT        NOT NULL CHECK (entity_type IN ('node', 'edge', 'event')),
+    entity_id   BIGINT,
+    actor       TEXT        NOT NULL DEFAULT 'user' CHECK (actor IN ('user', 'agent')),
+    summary     TEXT        NOT NULL,
+    data        JSONB       NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log (created_at DESC);

@@ -114,6 +114,15 @@ WHERE from_id = ANY($1::bigint[])
 		return nil, fmt.Errorf("add_event update last_seen: %w", err)
 	}
 
+	// Changelog (stessa transazione: o l'evento + il log, o niente).
+	summaryText := rawText
+	if summary != "" {
+		summaryText = summary
+	}
+	if err := LogActivity(ctx, tx, "event_added", "event", eventID, ActorAgent, summaryText, nil); err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("add_event commit: %w", err)
 	}

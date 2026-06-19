@@ -34,11 +34,12 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// cleanGraph azzera le tabelle prima di ogni test per isolarli.
+// cleanGraph azzera le tabelle prima di ogni test per isolarli. activity_log non
+// ha FK verso nodes, quindi il CASCADE non la tocca: va troncata a parte.
 func cleanGraph(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, "TRUNCATE nodes RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE nodes, activity_log RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
