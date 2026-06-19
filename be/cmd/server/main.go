@@ -56,6 +56,14 @@ func run() error {
 	defer pool.Close()
 	logger.Info("connesso al database")
 
+	// Applichiamo lo schema (idempotente) all'avvio: il deploy non dipende più dal
+	// bind-mount in /docker-entrypoint-initdb.d, che su alcune PaaS (Coolify) è
+	// inaffidabile. Al primo avvio crea tabelle ed estensioni; ai successivi è no-op.
+	if err := db.ApplySchema(connectCtx, pool); err != nil {
+		return err
+	}
+	logger.Info("schema applicato")
+
 	// Client LLM (Gemini) e server HTTP con le sue dipendenze.
 	llmClient := llm.NewGemini(cfg.GeminiAPIKey)
 	apiServer := server.New(pool, llmClient, cfg.APIToken)
