@@ -92,6 +92,40 @@ func TestCreateAndDeleteLink(t *testing.T) {
 	}
 }
 
+// DeletePerson rimuove la persona e i suoi archi (cascade); su id assente dà
+// ErrNodeNotFound.
+func TestDeletePerson(t *testing.T) {
+	pool := testPool(t)
+	cleanGraph(t, pool)
+	ctx := context.Background()
+
+	a, _ := CreatePerson(ctx, pool, PersonInput{Name: "A"})
+	b, _ := CreatePerson(ctx, pool, PersonInput{Name: "B"})
+	if _, err := CreateLink(ctx, pool, LinkInput{FromID: a.ID, ToID: b.ID, Type: "amico"}); err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+
+	if err := DeletePerson(ctx, pool, a.ID); err != nil {
+		t.Fatalf("DeletePerson: %v", err)
+	}
+	// La persona non c'è più.
+	if _, err := WikiPage(ctx, pool, a.ID); !errors.Is(err, ErrNodeNotFound) {
+		t.Errorf("persona non rimossa: %v", err)
+	}
+	// L'arco è caduto per cascade: B non ha più vicini.
+	page, err := WikiPage(ctx, pool, b.ID)
+	if err != nil {
+		t.Fatalf("WikiPage B: %v", err)
+	}
+	if len(page.Neighbors) != 0 {
+		t.Errorf("arco non rimosso in cascade: %+v", page.Neighbors)
+	}
+	// Delete ripetuto → not found.
+	if err := DeletePerson(ctx, pool, a.ID); !errors.Is(err, ErrNodeNotFound) {
+		t.Errorf("atteso ErrNodeNotFound, ho %v", err)
+	}
+}
+
 // SearchPeople trova per alias e ignora i luoghi.
 func TestSearchPeople(t *testing.T) {
 	pool := testPool(t)

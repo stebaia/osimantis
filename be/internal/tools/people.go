@@ -268,6 +268,34 @@ func DeleteLink(ctx context.Context, pool *pgxpool.Pool, id int64) error {
 	return tx.Commit(ctx)
 }
 
+// DeletePerson rimuove una persona per id e logga l'attività. Gli archi e le
+// partecipazioni a eventi collegati cadono per ON DELETE CASCADE. Restituisce
+// ErrNodeNotFound se l'id non esiste o non è una persona.
+func DeletePerson(ctx context.Context, pool *pgxpool.Pool, id int64) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete person begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var name string
+	err = tx.QueryRow(ctx,
+		`DELETE FROM nodes WHERE id = $1 AND type = 'person' RETURNING name`, id).
+		Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNodeNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete person: %w", err)
+	}
+
+	if err := LogActivity(ctx, tx, "person_deleted", "node", id, ActorUser,
+		"Eliminata persona "+name, nil); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // coalesceData restituisce una mappa non-nil per le colonne data.
 func coalesceData(d map[string]any) map[string]any {
 	if d == nil {

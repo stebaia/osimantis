@@ -120,6 +120,27 @@ func (s *Server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, node)
 }
 
+// handleDeletePerson: DELETE /people/{id}  rimuove una persona (e i suoi archi).
+func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := requestCtx(r, 10*time.Second)
+	defer cancel()
+
+	err := tools.DeletePerson(ctx, s.pool, id)
+	if errors.Is(err, tools.ErrNodeNotFound) {
+		writeError(w, http.StatusNotFound, "persona non trovata")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "eliminazione fallita")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
 // handleCreateLink: POST /links  crea o aggiorna un legame.
 func (s *Server) handleCreateLink(w http.ResponseWriter, r *http.Request) {
 	var in tools.LinkInput

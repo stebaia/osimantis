@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /people", s.handleCreatePerson)
 	mux.HandleFunc("GET /people/{id}", s.handlePersonDetail)
 	mux.HandleFunc("PATCH /people/{id}", s.handleUpdatePerson)
+	mux.HandleFunc("DELETE /people/{id}", s.handleDeletePerson)
 	mux.HandleFunc("POST /links", s.handleCreateLink)
 	mux.HandleFunc("DELETE /links/{id}", s.handleDeleteLink)
 	mux.HandleFunc("GET /feed", s.handleFeed)
