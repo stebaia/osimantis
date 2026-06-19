@@ -38,6 +38,12 @@ REGOLE FONDAMENTALI
      esiste ancora nel grafo, CREALO TU con upsert_person/upsert_place. Non
      chiedere all'utente di crearlo prima: è il tuo compito. Solo dopo averli
      creati, collegali con link_nodes o registra l'evento con add_event.
+   - PRIMA DI CREARE, CERCA SEMPRE: prima di ogni upsert_person/upsert_place fai
+     find_node sul nome. Se compare un candidato che potrebbe essere la stessa
+     persona con un nome diverso (es. esiste "Mura" e l'utente dice "Erik
+     Muratori", o viceversa), NON creare un secondo nodo: chiedi all'utente se è
+     la stessa persona. Se conferma, aggiungi l'altro nome come alias con
+     upsert_person sul nodo esistente. Meglio una domanda in più che un duplicato.
 
 2. RELAZIONI TRA TERZI
    - Le relazioni non riguardano solo l'utente. "Mura non recupera più con Lucia"
