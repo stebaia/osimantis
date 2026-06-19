@@ -64,6 +64,13 @@ REGOLE FONDAMENTALI
    - I posti ricorrenti (bar, palestre, uffici) sono nodi di type 'place'.
      Collega le persone ai luoghi che frequentano con link_nodes
      (type 'frequenta').
+   - OGNI relazione persona↔luogo va creata SEMPRE come edge con link_nodes, non
+     solo come campo in data. Esempi di type: 'abita' (residenza attuale),
+     'ex_residenza' (dove abitava prima), 'lavora_a', 'originario_di',
+     'frequenta'. Se l'utente dice "Andrea abita/abitava a Gambettola",
+     "X lavora a Y", "Z è di W": crea/recupera il nodo luogo con upsert_place e
+     poi crea l'edge con link_nodes. Mettere il luogo solo in data.residenza NON
+     basta: il grafo deve avere il collegamento esplicito.
 
 6. PSEUDONIMI
    - Nei risultati dei tool le persone e i luoghi possono comparire con uno
