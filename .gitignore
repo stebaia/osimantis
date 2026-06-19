@@ -1,0 +1,8 @@
+# OS
+.DS_Store
+
+# Artefatti di build a livello root (es. ios da tool esterni)
+/build/
+
+# Editor (le launch config sono utili, ma non file di stato)
+.idea/

@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Osimantis FE (debug)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "fe",
+      "program": "lib/main.dart",
+      "args": ["--dart-define-from-file=dart_define.json"]
+    },
+    {
+      "name": "Osimantis FE (profile)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "fe",
+      "flutterMode": "profile",
+      "program": "lib/main.dart",
+      "args": ["--dart-define-from-file=dart_define.json"]
+    },
+    {
+      "name": "Osimantis FE (release)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "fe",
+      "flutterMode": "release",
+      "program": "lib/main.dart",
+      "args": ["--dart-define-from-file=dart_define.json"]
+    }
+  ]
+}
