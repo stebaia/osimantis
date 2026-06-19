@@ -80,8 +80,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // chatRequest / chatResponse sono i contratti dell'endpoint /chat.
-type chatRequest struct {
+//
+// History è lo storico della conversazione corrente (memoria a breve termine):
+// il frontend lo invia a ogni messaggio così l'agente mantiene il filo del
+// discorso (es. capisce a chi si riferisce "lui"). È la memoria conversazionale,
+// distinta dalla memoria a lungo termine che è il grafo stesso. È opzionale: se
+// assente, l'agente vede solo il messaggio corrente (comportamento precedente).
+type chatMessage struct {
+	Role string `json:"role"` // "user" | "assistant"
 	Text string `json:"text"`
+}
+type chatRequest struct {
+	Text    string        `json:"text"`
+	History []chatMessage `json:"history"`
 }
 type chatResponse struct {
 	Reply string `json:"reply"`
@@ -112,7 +123,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// sostituiti con pseudonimi stabili prima di raggiungere l'LLM. La mappa è
 	// fresca a ogni conversazione, così nulla sfugge tra richieste diverse.
 	exec := agent.NewPseudonymizingExecutor(s.exec)
-	reply, err := agent.RunAgent(ctx, s.llm, exec, s.toolDefs, req.Text)
+	prior := buildHistory(req.History)
+	reply, err := agent.RunAgent(ctx, s.llm, exec, s.toolDefs, req.Text, prior)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusGatewayTimeout, "timeout nell'elaborazione della richiesta")
@@ -122,6 +134,32 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, chatResponse{Reply: reply})
+}
+
+// maxHistoryTurns limita quanti messaggi di storico passiamo all'LLM, per non
+// gonfiare il contesto (e i costi). Teniamo gli ultimi N.
+const maxHistoryTurns = 20
+
+// buildHistory converte lo storico inviato dal frontend in turni per l'LLM,
+// mappando i ruoli (assistant→model) e tenendo solo gli ultimi maxHistoryTurns.
+// I messaggi vuoti o con ruoli ignoti vengono scartati.
+func buildHistory(msgs []chatMessage) []llm.Turn {
+	if len(msgs) > maxHistoryTurns {
+		msgs = msgs[len(msgs)-maxHistoryTurns:]
+	}
+	out := make([]llm.Turn, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Text == "" {
+			continue
+		}
+		switch m.Role {
+		case "user":
+			out = append(out, llm.Turn{Role: llm.RoleUser, Text: m.Text})
+		case "assistant", "model":
+			out = append(out, llm.Turn{Role: llm.RoleModel, Text: m.Text})
+		}
+	}
+	return out
 }
 
 // handleGraph restituisce l'intero grafo (nodi + archi) per l'app Flutter.

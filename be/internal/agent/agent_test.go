@@ -54,7 +54,7 @@ func TestRunAgentToolThenText(t *testing.T) {
 			return map[string]any{"candidates": []any{map[string]any{"id": 1, "name": "Erik Muratori"}}}, nil
 		}}
 
-		reply, err := RunAgent(context.Background(), client, exec, nil, "chi è Mura?")
+		reply, err := RunAgent(context.Background(), client, exec, nil, "chi è Mura?", nil)
 		if err != nil {
 			t.Fatalf("RunAgent: %v", err)
 		}
@@ -78,6 +78,34 @@ func TestRunAgentToolThenText(t *testing.T) {
 	})
 }
 
+// Lo storico (prior) passato a RunAgent deve finire nel contesto inviato
+// all'LLM, tra il system prompt e il messaggio corrente.
+func TestRunAgentIncludesHistory(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		{Role: llm.RoleModel, Text: "ok"},
+	}}
+	prior := []llm.Turn{
+		{Role: llm.RoleUser, Text: "io sono Stefano"},
+		{Role: llm.RoleModel, Text: "Ciao Stefano"},
+	}
+
+	_, err := RunAgent(context.Background(), client, &mockExecutor{}, nil, "chi sono?", prior)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	sent := client.histories[0]
+	// system, prior(2), messaggio corrente = 4 turni.
+	if len(sent) != 4 {
+		t.Fatalf("storico inviato len = %d, atteso 4: %+v", len(sent), sent)
+	}
+	if sent[1].Text != "io sono Stefano" || sent[2].Text != "Ciao Stefano" {
+		t.Errorf("prior non incluso correttamente: %+v", sent)
+	}
+	if sent[3].Text != "chi sono?" {
+		t.Errorf("messaggio corrente in posizione errata: %+v", sent[3])
+	}
+}
+
 // Risposta diretta senza tool.
 func TestRunAgentTextOnly(t *testing.T) {
 	client := &mockLLM{responses: []llm.Turn{
@@ -85,7 +113,7 @@ func TestRunAgentTextOnly(t *testing.T) {
 	}}
 	exec := &mockExecutor{}
 
-	reply, err := RunAgent(context.Background(), client, exec, nil, "ciao")
+	reply, err := RunAgent(context.Background(), client, exec, nil, "ciao", nil)
 	if err != nil {
 		t.Fatalf("RunAgent: %v", err)
 	}
@@ -108,7 +136,7 @@ func TestRunAgentToolErrorContinues(t *testing.T) {
 		return nil, errors.New("boom")
 	}}
 
-	reply, err := RunAgent(context.Background(), client, exec, nil, "cerca x")
+	reply, err := RunAgent(context.Background(), client, exec, nil, "cerca x", nil)
 	if err != nil {
 		t.Fatalf("RunAgent non deve fallire per errore tool: %v", err)
 	}
@@ -133,7 +161,7 @@ func TestRunAgentIterationCap(t *testing.T) {
 	client := &mockLLM{responses: loop}
 	exec := &mockExecutor{}
 
-	_, err := RunAgent(context.Background(), client, exec, nil, "loop")
+	_, err := RunAgent(context.Background(), client, exec, nil, "loop", nil)
 	if err == nil {
 		t.Fatal("atteso errore per cap iterazioni")
 	}

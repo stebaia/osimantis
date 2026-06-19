@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -37,15 +38,30 @@ type ToolExecutor interface {
 //
 // Cap di maxIterations. Se un tool fallisce, l'errore viene passato all'LLM come
 // risultato (non si interrompe il loop).
-func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs []map[string]any, userText string) (string, error) {
-	history := []llm.Turn{
-		{Role: llm.RoleUser, Text: SystemPrompt},
-		{Role: llm.RoleUser, Text: userText},
-	}
+// prior è lo storico della conversazione (memoria a breve termine), che il
+// chiamante passa come turni user/model già pronti. Può essere nil: in quel caso
+// l'agente vede solo system prompt + messaggio corrente.
+func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs []map[string]any, userText string, prior []llm.Turn) (string, error) {
+	history := make([]llm.Turn, 0, len(prior)+2)
+	history = append(history, llm.Turn{Role: llm.RoleUser, Text: SystemPrompt})
+	history = append(history, prior...)
+	history = append(history, llm.Turn{Role: llm.RoleUser, Text: userText})
 
+	emptyResponses := 0
 	for iter := 0; iter < maxIterations; iter++ {
 		turn, err := client.Chat(ctx, history, toolDefs)
 		if err != nil {
+			// Gemini a volte restituisce un candidato vuoto (né testo né tool):
+			// è transitorio. Ritentiamo qualche volta lo stesso contesto prima di
+			// arrenderci con un messaggio gentile, invece di propagare un 500.
+			var bad *llm.BadResponseError
+			if errors.As(err, &bad) && bad.StatusCode == 0 {
+				emptyResponses++
+				if emptyResponses <= 2 {
+					continue
+				}
+				return "Non sono riuscito a elaborare la risposta. Puoi riprovare o riformulare?", nil
+			}
 			return "", fmt.Errorf("chiamata LLM (iterazione %d): %w", iter, err)
 		}
 
