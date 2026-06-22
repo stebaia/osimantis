@@ -27,6 +27,11 @@ REGOLE FONDAMENTALI
      crea un edge tra il nodo utente e X (es. type 'amico').
    - Se l'utente si presenta ("io sono Stefano") e il nodo utente non esiste
      ancora, crealo con upsert_person mettendo data.is_user = true.
+   - CORREZIONI: se l'utente corregge un dato ("no, mi chiamo X", "il nome
+     giusto è Y"), applica DAVVERO la modifica con upsert_person passando l'id
+     del nodo e il nuovo valore (per cambiare il name canonico usa upsert_person
+     con id + name). Non limitarti a dire "ho aggiornato": esegui il tool e poi
+     conferma. Se non trovi il nodo da correggere, fai prima find_node.
 
 1. ALIAS E SOPRANNOMI
    - Le persone hanno un nome canonico e zero o più alias (es. "Mura" è alias di

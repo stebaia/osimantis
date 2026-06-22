@@ -87,6 +87,47 @@ func TestUpsertPersonWithAlias(t *testing.T) {
 	if node2.Data["lavoro"] != "ingegnere" || node2.Data["interessi"] != "vela" {
 		t.Errorf("merge data fallito: %v", node2.Data)
 	}
+	// Update SENZA name: il name esistente va preservato.
+	if node2.Name != "Erik Muratori" {
+		t.Errorf("update senza name ha alterato il name: %q", node2.Name)
+	}
+}
+
+// L'update di upsert_person deve poter CAMBIARE il name canonico (correzione),
+// preservando alias e data. Regressione del bug "non riesco a correggere il nome".
+func TestUpsertPersonUpdatesName(t *testing.T) {
+	pool := testPool(t)
+	cleanGraph(t, pool)
+	ctx := context.Background()
+
+	res, err := upsertPerson(ctx, pool, map[string]any{
+		"name":    "Stefano Baluardi",
+		"aliases": []any{"Ste"},
+		"data":    map[string]any{"is_user": true},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := res.(nodeResult).ID
+
+	upd, err := upsertPerson(ctx, pool, map[string]any{
+		"id":   float64(id),
+		"name": "Stefano Baiardi",
+	})
+	if err != nil {
+		t.Fatalf("update name: %v", err)
+	}
+	node := upd.(nodeResult)
+	if node.Name != "Stefano Baiardi" {
+		t.Errorf("name non aggiornato: %q", node.Name)
+	}
+	// alias e data preservati.
+	if len(node.Aliases) != 1 || node.Aliases[0] != "Ste" {
+		t.Errorf("alias non preservati: %v", node.Aliases)
+	}
+	if node.Data["is_user"] != true {
+		t.Errorf("data non preservato: %v", node.Data)
+	}
 }
 
 func TestFindNodeResolvesAlias(t *testing.T) {

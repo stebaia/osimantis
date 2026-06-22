@@ -119,12 +119,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 
-	// Pseudonimizzazione per-richiesta: i nomi reali estratti dal grafo vengono
-	// sostituiti con pseudonimi stabili prima di raggiungere l'LLM. La mappa è
-	// fresca a ogni conversazione, così nulla sfugge tra richieste diverse.
-	exec := agent.NewPseudonymizingExecutor(s.exec)
+	// NB: la pseudonimizzazione verso l'LLM è DISATTIVATA. È un'app personale
+	// single-user (il tuo grafo lo vede solo il tuo LLM) e mascherare i nomi
+	// impediva all'agente di modificare i nodi in modo affidabile (es. correggere
+	// il proprio nome): vedeva pseudonimi invece dei nomi reali. Il wrapper
+	// agent.NewPseudonymizingExecutor resta disponibile se servisse riattivarla.
 	prior := buildHistory(req.History)
-	reply, err := agent.RunAgent(ctx, s.llm, exec, s.toolDefs, req.Text, prior)
+	reply, err := agent.RunAgent(ctx, s.llm, s.exec, s.toolDefs, req.Text, prior)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusGatewayTimeout, "timeout nell'elaborazione della richiesta")

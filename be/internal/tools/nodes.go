@@ -98,17 +98,29 @@ func upsertNode(ctx context.Context, pool *pgxpool.Pool, nodeType string, args m
 		return nil, err
 	}
 
+	// name è opzionale in update (per correzioni del nome canonico), obbligatorio
+	// in insert.
+	nameOpt, err := argStringOpt(args, "name")
+	if err != nil {
+		return nil, err
+	}
+
 	var node nodeResult
 	if hasID {
-		// UPDATE: merge alias (dedup) + merge data.
+		// UPDATE: name (se fornito) + merge alias (dedup) + merge data.
+		var nameArg any
+		if nameOpt != "" {
+			nameArg = nameOpt
+		}
 		const sql = `
 UPDATE nodes
-SET aliases    = ARRAY(SELECT DISTINCT unnest(aliases || $2::text[])),
+SET name       = COALESCE($4, name),
+    aliases    = ARRAY(SELECT DISTINCT unnest(aliases || $2::text[])),
     data       = data || $3::jsonb,
     updated_at = now()
 WHERE id = $1
 RETURNING id, type, name, aliases, data`
-		row := pool.QueryRow(ctx, sql, id, aliases, data)
+		row := pool.QueryRow(ctx, sql, id, aliases, data, nameArg)
 		node, err = scanNode(row)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("upsert: nodo id=%d non trovato", id)
