@@ -1,11 +1,15 @@
-import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:wave_blob/wave_blob.dart';
 
 import '../../../../core/theme/app_colors.dart';
 
-/// Il blob conversazionale sfumato viola/rosa/azzurro delle schermate di
-/// riferimento. Pulsa lentamente quando [active] (ascolto/invio in corso).
+/// Blob conversazionale animato e sfumato (viola/rosa/azzurro) costruito con
+/// il pacchetto `wave_blob`.
+///
+/// `WaveBlob` non ha un proprio loop di animazione, quindi usiamo un
+/// [AnimationController] che forza il repaint ad ogni frame.
 class VoiceBlob extends StatefulWidget {
   const VoiceBlob({super.key, this.active = false, this.size = 180});
 
@@ -20,7 +24,7 @@ class _VoiceBlobState extends State<VoiceBlob>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 4),
+    duration: const Duration(seconds: 1),
   )..repeat();
 
   @override
@@ -34,53 +38,28 @@ class _VoiceBlobState extends State<VoiceBlob>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final t = _controller.value * 2 * math.pi;
-        // Lieve pulsazione: più marcata quando attivo.
-        final pulse = widget.active ? 0.08 : 0.03;
-        final scale = 1 + math.sin(t) * pulse;
-        return Transform.scale(
-          scale: scale,
-          child: Container(
+        return ImageFiltered(
+          imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: SizedBox(
             width: widget.size,
             height: widget.size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: SweepGradient(
-                transform: GradientRotation(t),
-                // Ripetiamo il primo colore in coda per chiudere il giro senza
-                // stacco netto.
-                colors: [...AppColors.blob, AppColors.blob[0]],
-              ),
+            child: WaveBlob(
+              blobCount: 3,
+              amplitude: widget.active ? 6500.0 : 3500.0,
+              speed: 6.0,
+              scale: 1.05,
+              autoScale: true,
+              // Rimuoviamo il cerchio centrale statico: vogliamo solo il blob.
+              centerCircle: false,
+              overCircle: false,
+              colors: AppColors.blob
+                  .map((color) => color.withValues(alpha: 0.9))
+                  .toList(),
+              child: const SizedBox.shrink(),
             ),
-            // Sfocatura morbida tramite ImageFiltered sul gradiente.
-            child: _BlurOverlay(size: widget.size),
           ),
         );
       },
-    );
-  }
-}
-
-/// Sfocatura applicata sopra il gradiente per l'effetto "nebbia" delle immagini.
-class _BlurOverlay extends StatelessWidget {
-  const _BlurOverlay({required this.size});
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [
-              Colors.white.withValues(alpha: 0.0),
-              Colors.white.withValues(alpha: 0.35),
-            ],
-            stops: const [0.5, 1.0],
-          ),
-        ),
-      ),
     );
   }
 }

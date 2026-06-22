@@ -52,6 +52,7 @@ dependencies:
   # UI
   flutter_html: ^3.0.0-beta.2
   flutter_svg: ^2.1.0
+  wave_blob: ^1.0.5
 
   # Voce (speech-to-text) + permessi microfono
   speech_to_text: ^7.0.0
