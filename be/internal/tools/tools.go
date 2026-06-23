@@ -24,6 +24,7 @@ type Registry map[string]ToolFn
 func NewRegistry() Registry {
 	return Registry{
 		"find_node":           findNode,
+		"get_user":            getUser,
 		"upsert_person":       upsertPerson,
 		"upsert_place":        upsertPlace,
 		"link_nodes":          linkNodes,

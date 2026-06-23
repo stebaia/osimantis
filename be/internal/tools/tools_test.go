@@ -44,6 +44,47 @@ func cleanGraph(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// get_user trova il nodo utente (is_user) senza conoscerne il nome, e
+// restituisce user=nil quando non esiste ancora.
+func TestGetUser(t *testing.T) {
+	pool := testPool(t)
+	cleanGraph(t, pool)
+	ctx := context.Background()
+
+	// Nessun utente ancora: user deve essere nil.
+	res, err := getUser(ctx, pool, nil)
+	if err != nil {
+		t.Fatalf("get_user (vuoto): %v", err)
+	}
+	if m := res.(map[string]any); m["user"] != nil {
+		t.Fatalf("atteso user=nil, ho %+v", m["user"])
+	}
+
+	// Creiamo l'utente e un'altra persona qualsiasi.
+	if _, err := upsertPerson(ctx, pool, map[string]any{
+		"name": "Stefano Baiardi",
+		"data": map[string]any{"is_user": true},
+	}); err != nil {
+		t.Fatalf("crea utente: %v", err)
+	}
+	if _, err := upsertPerson(ctx, pool, map[string]any{"name": "Erik Muratori"}); err != nil {
+		t.Fatalf("crea altra persona: %v", err)
+	}
+
+	// get_user deve restituire proprio l'utente, non l'altra persona.
+	res, err = getUser(ctx, pool, nil)
+	if err != nil {
+		t.Fatalf("get_user: %v", err)
+	}
+	user, ok := res.(map[string]any)["user"].(nodeResult)
+	if !ok {
+		t.Fatalf("user assente o di tipo errato: %+v", res)
+	}
+	if user.Name != "Stefano Baiardi" || user.Data["is_user"] != true {
+		t.Errorf("utente inatteso: %+v", user)
+	}
+}
+
 func TestUpsertPersonWithAlias(t *testing.T) {
 	pool := testPool(t)
 	cleanGraph(t, pool)

@@ -68,6 +68,28 @@ LIMIT 10`
 	return map[string]any{"candidates": results}, nil
 }
 
+// getUser restituisce il nodo che rappresenta l'UTENTE (data.is_user = true),
+// senza bisogno di conoscerne il nome. Risolve l'incongruenza per cui l'agente
+// non riusciva a rispondere a "chi sono?" pur identificando l'utente quando ne
+// veniva fatto il nome. Restituisce {"user": null} se non è ancora stato creato.
+func getUser(ctx context.Context, pool *pgxpool.Pool, args map[string]any) (any, error) {
+	const sql = `
+SELECT id, type, name, aliases, data
+FROM nodes
+WHERE type = 'person' AND data->>'is_user' = 'true'
+ORDER BY updated_at DESC
+LIMIT 1`
+
+	node, err := scanNode(pool.QueryRow(ctx, sql))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return map[string]any{"user": nil}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get_user: %w", err)
+	}
+	return map[string]any{"user": node}, nil
+}
+
 // upsertPerson crea o aggiorna una persona. Vedi upsertNode.
 func upsertPerson(ctx context.Context, pool *pgxpool.Pool, args map[string]any) (any, error) {
 	return upsertNode(ctx, pool, "person", args)

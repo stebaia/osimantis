@@ -96,6 +96,10 @@ type chatRequest struct {
 }
 type chatResponse struct {
 	Reply string `json:"reply"`
+	// Touched sono i nodi persona toccati durante il turno (in ordine di
+	// comparsa). Il frontend apre la scheda dell'ULTIMO. Vuoto se il messaggio
+	// non ha riguardato nessuna persona (es. una domanda generica).
+	Touched []agent.TouchedNode `json:"touched"`
 }
 
 // handleChat esegue l'agente sul testo dell'utente e ritorna la risposta.
@@ -124,8 +128,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// impediva all'agente di modificare i nodi in modo affidabile (es. correggere
 	// il proprio nome): vedeva pseudonimi invece dei nomi reali. Il wrapper
 	// agent.NewPseudonymizingExecutor resta disponibile se servisse riattivarla.
+	// Executor per-richiesta che traccia i nodi persona toccati, così possiamo
+	// dire al frontend quale scheda aprire. Avvolge l'executor condiviso.
+	tracker := agent.NewTrackingExecutor(s.exec)
+
 	prior := buildHistory(req.History)
-	reply, err := agent.RunAgent(ctx, s.llm, s.exec, s.toolDefs, req.Text, prior)
+	reply, err := agent.RunAgent(ctx, s.llm, tracker, s.toolDefs, req.Text, prior)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusGatewayTimeout, "timeout nell'elaborazione della richiesta")
@@ -134,7 +142,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "errore nell'elaborazione: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, chatResponse{Reply: reply})
+	writeJSON(w, http.StatusOK, chatResponse{Reply: reply, Touched: tracker.Touched()})
 }
 
 // maxHistoryTurns limita quanti messaggi di storico passiamo all'LLM, per non

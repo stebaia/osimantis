@@ -15,6 +15,11 @@ var Definitions = []map[string]any{
 		}, "query"),
 	},
 	{
+		"name":        "get_user",
+		"description": "Restituisce il nodo che rappresenta l'UTENTE con cui stai parlando (quello con is_user). Usalo SEMPRE quando l'utente parla di sé ('io', 'me', 'chi sono', 'i miei amici') invece di cercarlo per nome. Restituisce user=null se non è ancora stato creato.",
+		"parameters":  obj(props{}),
+	},
+	{
 		"name":        "upsert_person",
 		"description": "Crea una persona o aggiorna quella esistente (passando id). Gli alias vengono uniti senza duplicati; i campi data vengono mergiati.",
 		"parameters": obj(props{
