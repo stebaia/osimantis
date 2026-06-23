@@ -6,19 +6,26 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/error/result.dart';
 import '../../../../core/speech/speech_service.dart';
+import '../../../person/domain/entities/person_card.dart';
+import '../../../person/domain/usecases/get_person.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/chat_reply.dart';
 import '../../domain/usecases/send_message.dart';
 
 part 'chat_event.dart';
 part 'chat_state.dart';
 
-/// Orchestrazione della schermata chat: dettatura vocale (SpeechService) e invio
-/// all'agente (SendMessage usecase).
+/// Orchestrazione della home blob-first: dettatura vocale (SpeechService), invio
+/// all'agente (SendMessage) e caricamento della scheda della persona toccata
+/// (GetPerson). Lo storico dei messaggi è tenuto solo come memoria conversazionale
+/// per il backend, NON viene reso come chat.
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
     required SendMessage sendMessage,
+    required GetPerson getPerson,
     required SpeechService speech,
   }) : _sendMessage = sendMessage,
+       _getPerson = getPerson,
        _speech = speech,
        super(const ChatState()) {
     on<ChatListeningToggled>(_onListeningToggled);
@@ -27,6 +34,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   final SendMessage _sendMessage;
+  final GetPerson _getPerson;
   final SpeechService _speech;
 
   Future<void> _onListeningToggled(
@@ -64,17 +72,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final text = event.text.trim();
     if (text.isEmpty || state.isSending) return;
 
-    // Lo storico = i messaggi già scambiati (memoria del discorso). Lo
-    // catturiamo PRIMA di aggiungere il nuovo messaggio e la bolla pending.
-    final history = state.messages.where((m) => !m.pending).toList();
+    // Storico (memoria del discorso) catturato PRIMA di aggiungere il messaggio
+    // corrente. Il backend lo usa per mantenere il filo (es. capire "lui/lei").
+    final history = List<ChatMessage>.from(state.messages);
 
-    final messages = [
-      ...state.messages,
-      ChatMessage(role: ChatRole.user, text: text),
-      const ChatMessage(role: ChatRole.assistant, text: '', pending: true),
-    ];
     emit(state.copyWith(
-      messages: messages,
+      messages: [...history, ChatMessage(role: ChatRole.user, text: text)],
       status: ChatStatus.sending,
       transcript: '',
       clearError: true,
@@ -82,21 +85,42 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     final result = await _sendMessage(text, history: history);
 
-    final updated = [...state.messages];
-    // L'ultimo messaggio è la bolla "pending" dell'assistente: la rimpiazziamo.
-    final replyText = switch (result) {
-      Success(:final data) => data,
-      Error(:final failure) => failure.message,
-    };
-    updated[updated.length - 1] = ChatMessage(
-      role: ChatRole.assistant,
-      text: replyText,
-    );
+    switch (result) {
+      case Error(:final failure):
+        emit(state.copyWith(status: ChatStatus.idle, errorMessage: failure.message));
+      case Success(:final data):
+        // Aggiungiamo la risposta allo storico (per i turni futuri) e mostriamo il
+        // testo breve; la scheda della persona toccata la carichiamo a parte.
+        emit(state.copyWith(
+          messages: [
+            ...state.messages,
+            ChatMessage(role: ChatRole.assistant, text: data.text),
+          ],
+          status: ChatStatus.idle,
+          lastReply: data.text,
+        ));
+        await _loadTouchedPerson(data, emit);
+    }
+  }
 
-    emit(state.copyWith(
-      messages: updated,
-      status: ChatStatus.idle,
-      errorMessage: result is Error<String> ? result.failure.message : null,
-    ));
+  /// Se il turno ha toccato almeno una persona, carica la scheda dell'ultima e la
+  /// rende attiva sotto al blob. Se il caricamento fallisce, la scheda precedente
+  /// resta invariata (l'errore non è bloccante: la reply è già mostrata).
+  Future<void> _loadTouchedPerson(ChatReply reply, Emitter<ChatState> emit) async {
+    final touched = reply.lastTouched;
+    if (touched == null) return;
+
+    emit(state.copyWith(personStatus: PersonStatus.loading));
+    final result = await _getPerson(touched.id);
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(activePerson: data, personStatus: PersonStatus.loaded));
+      case Error():
+        emit(state.copyWith(
+          personStatus: state.activePerson != null
+              ? PersonStatus.loaded
+              : PersonStatus.none,
+        ));
+    }
   }
 }

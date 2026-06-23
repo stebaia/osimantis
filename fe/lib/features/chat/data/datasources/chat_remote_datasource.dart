@@ -5,11 +5,12 @@ class ChatRemoteDataSource {
   ChatRemoteDataSource(this._dio);
   final Dio _dio;
 
-  /// POST /chat con body {"text": ..., "history": [...]} → ritorna "reply".
-  /// history è lo storico della conversazione (memoria a breve termine), così
-  /// l'agente mantiene il filo del discorso. Propaga DioException: la mappatura
-  /// a Failure la fa il repository.
-  Future<String> sendMessage(
+  /// POST /chat con body {"text": ..., "history": [...]} → ritorna il JSON grezzo
+  /// {"reply": ..., "touched": [{id, name}]}. history è lo storico della
+  /// conversazione (memoria a breve termine), così l'agente mantiene il filo del
+  /// discorso. Propaga DioException: la mappatura a Failure e al dominio la fa il
+  /// repository.
+  Future<Map<String, dynamic>> sendMessage(
     String text, {
     List<Map<String, String>> history = const [],
   }) async {
@@ -17,8 +18,8 @@ class ChatRemoteDataSource {
       '/chat',
       data: {'text': text, 'history': history},
     );
-    final reply = res.data?['reply'];
-    if (reply is String) return reply;
+    final data = res.data;
+    if (data != null && data['reply'] is String) return data;
     throw DioException(
       requestOptions: res.requestOptions,
       response: res,

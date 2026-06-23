@@ -22,10 +22,25 @@ class VoiceBlob extends StatefulWidget {
 
 class _VoiceBlobState extends State<VoiceBlob>
     with SingleTickerProviderStateMixin {
+  // Il blob ondeggia più veloce quando è attivo (ascolto/elaborazione), più lento
+  // a riposo. Cambiamo la durata del controller in base ad `active`.
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 1),
+    duration: _durationFor(widget.active),
   )..repeat();
+
+  static Duration _durationFor(bool active) =>
+      active ? const Duration(milliseconds: 900) : const Duration(seconds: 3);
+
+  @override
+  void didUpdateWidget(VoiceBlob oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) {
+      _controller
+        ..duration = _durationFor(widget.active)
+        ..repeat();
+    }
+  }
 
   @override
   void dispose() {
@@ -38,7 +53,11 @@ class _VoiceBlobState extends State<VoiceBlob>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        return ImageFiltered(
+        // Center + box quadrato fisso: il blob resta centrato e non "scivola"
+        // quando l'ampiezza cambia in stato attivo (autoScale di wave_blob può
+        // disegnare in modo asimmetrico dentro il box).
+        return Center(
+          child: ImageFiltered(
           imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: SizedBox(
             width: widget.size,
@@ -57,6 +76,7 @@ class _VoiceBlobState extends State<VoiceBlob>
                   .toList(),
               child: const SizedBox.shrink(),
             ),
+          ),
           ),
         );
       },
