@@ -15,10 +15,14 @@ import (
 )
 
 // maxIterations limita i giri LLM↔tool per evitare loop infiniti. Il playbook
-// suggeriva 6, ma i test reali mostrano che un singolo messaggio può toccare più
-// entità (find_node + upsert per ciascuna + link/add_event), avvicinandosi al
-// limite prima della risposta finale. 10 dà margine senza rinunciare alla guardia.
-const maxIterations = 10
+// suggeriva 6, ma i test reali mostrano che un singolo messaggio fitto può
+// toccare molte entità: find_node + upsert per ogni persona/luogo, un link per
+// ogni relazione, l'add_event finale, PIÙ i giri extra che i nudge della safety
+// net possono aggiungere. Con 10 un messaggio tipo "al Rift c'erano A (ragazza
+// di B) e C (ragazza di D)" esauriva il cap proprio sull'ultimo passo (l'evento).
+// 20 dà margine abbondante; il loop resta protetto da maxNudges e dal timeout
+// HTTP della richiesta.
+const maxIterations = 20
 
 // maxNudges limita quante volte per turno la safety net può reiniettare un
 // richiamo. Un messaggio fitto può avere più lacune insieme (persone create ma
@@ -117,7 +121,14 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 		history = append(history, llm.Turn{Role: llm.RoleTool, ToolResults: results})
 	}
 
-	return "", fmt.Errorf("raggiunto il limite di %d iterazioni senza una risposta finale", maxIterations)
+	// Cap raggiunto senza una risposta testuale finale. Le scritture eseguite nelle
+	// iterazioni precedenti sono già state committate (ogni tool scrive subito), per
+	// cui propagare un 500 sarebbe fuorviante: il grosso del lavoro è salvato.
+	// Restituiamo una conferma onesta — confermiamo ciò che è stato fatto ma
+	// invitiamo a ricontrollare — invece di un errore che fa credere all'utente di
+	// aver perso tutto. Logghiamo il caso per accorgercene se diventa frequente.
+	slog.Warn("agente: limite iterazioni raggiunto", "max", maxIterations)
+	return "Ho salvato le persone e le relazioni che mi hai detto. C'era parecchia roba in un colpo solo: se manca qualcosa (tipo l'evento), scrivimelo e lo aggiungo.", nil
 }
 
 // writeTools sono i tool che modificano il grafo. I tool di sola lettura

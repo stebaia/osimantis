@@ -398,7 +398,9 @@ func TestPromisesSave(t *testing.T) {
 	}
 }
 
-// Se il modello continua a chiedere tool all'infinito, il cap interviene.
+// Se il modello continua a chiedere tool all'infinito, il cap interviene: non
+// propaga un errore (le scritture fatte sono già salvate) ma restituisce una
+// risposta gentile, dopo aver speso esattamente maxIterations giri.
 func TestRunAgentIterationCap(t *testing.T) {
 	loop := make([]llm.Turn, maxIterations+2)
 	for i := range loop {
@@ -407,9 +409,12 @@ func TestRunAgentIterationCap(t *testing.T) {
 	client := &mockLLM{responses: loop}
 	exec := &mockExecutor{}
 
-	_, err := RunAgent(context.Background(), client, exec, nil, "loop", nil)
-	if err == nil {
-		t.Fatal("atteso errore per cap iterazioni")
+	reply, err := RunAgent(context.Background(), client, exec, nil, "loop", nil)
+	if err != nil {
+		t.Fatalf("al cap non deve esserci errore, ottenuto: %v", err)
+	}
+	if reply == "" {
+		t.Error("al cap atteso un messaggio di fallback non vuoto")
 	}
 	if client.calls != maxIterations {
 		t.Errorf("chiamate LLM = %d, attese %d (cap)", client.calls, maxIterations)
