@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -7,6 +5,7 @@ import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/graph_data.dart';
 import '../bloc/graph_bloc.dart';
+import '../layout/force_directed_layout.dart';
 import '../widgets/graph_canvas.dart';
 import '../widgets/node_chip.dart';
 
@@ -79,7 +78,7 @@ class _GraphCanvas extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
-        final positions = _circleLayout(graph.nodes, size);
+        final positions = forceDirectedLayout(graph, size);
 
         return Stack(
           children: [
@@ -110,16 +109,3 @@ class _GraphCanvas extends StatelessWidget {
   }
 }
 
-/// Layout iniziale: nodi distribuiti su un cerchio attorno al centro. Provvisorio
-/// — sostituito dal layout force-directed nello step successivo.
-Map<int, Offset> _circleLayout(List<GraphNode> nodes, Size size) {
-  final center = Offset(size.width / 2, size.height / 2);
-  final radius = math.min(size.width, size.height) * 0.36;
-  final positions = <int, Offset>{};
-  for (var i = 0; i < nodes.length; i++) {
-    final angle = (i / nodes.length) * 2 * math.pi;
-    positions[nodes[i].id] = center +
-        Offset(radius * math.cos(angle), radius * math.sin(angle));
-  }
-  return positions;
-}
