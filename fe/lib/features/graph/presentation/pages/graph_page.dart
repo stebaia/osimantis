@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -15,21 +13,24 @@ import '../widgets/graph_canvas.dart';
 import '../widgets/node_chip.dart';
 
 /// Spazio del grafo: tutte le persone e i luoghi come nodi collegati dalle loro
-/// relazioni. Carica /graph e li dispone su un canvas.
-///
-/// Step 2 (render statico): posizioni iniziali a cerchio, archi disegnati con
-/// CustomPaint, nodi come chip. Pan/zoom e tap arrivano negli step successivi.
+/// relazioni. Carica /graph e li dispone su un canvas con layout force-directed;
+/// pan/zoom via InteractiveViewer; tap su una persona apre la sua scheda.
 class GraphPage extends StatelessWidget {
-  const GraphPage({super.key, this.highlightIds = const {}});
+  const GraphPage({super.key, this.highlightIds = const {}, this.bloc});
 
   /// Id dei nodi da evidenziare all'apertura (es. le persone toccate dall'ultimo
   /// messaggio, o il nodo da cui si è aperto "vedi nel grafo").
   final Set<int> highlightIds;
 
+  /// Bloc iniettabile per i test (con un grafo finto). In produzione è null e la
+  /// pagina ne crea uno via DI che carica /graph.
+  final GraphBloc? bloc;
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => GraphBloc(getGraph: sl())..add(const GraphLoadRequested()),
+      create: (_) =>
+          bloc ?? (GraphBloc(getGraph: sl())..add(const GraphLoadRequested())),
       child: _GraphView(highlightIds: highlightIds),
     );
   }
@@ -91,35 +92,32 @@ class _GraphCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Il canvas è più GRANDE del viewport: i chip dei nodi sono larghi
-        // (~150px), quindi su pochi pixel si accavallerebbero. Diamo spazio in
-        // proporzione al numero di nodi e lasciamo che l'utente esplori con
-        // pan/zoom (InteractiveViewer). ~220px di "stanza" per nodo.
-        final room = graph.nodes.length * 220.0;
-        final canvasW = math.max(constraints.maxWidth, room);
-        final canvasH = math.max(constraints.maxHeight, room);
-        final size = Size(canvasW, canvasH);
+        // Il canvas riempie ESATTAMENTE il viewport: così all'apertura tutti i
+        // nodi sono visibili senza bisogno di zoom-to-fit. Il layout li dispone
+        // dentro questi confini (con padding interno per non sbordare). L'utente
+        // può comunque fare pinch-zoom e pan per avvicinarsi (constrained:true,
+        // niente canvas gigante che lasciava la vista iniziale su un angolo vuoto).
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
         final positions = forceDirectedLayout(graph, size);
 
-        // Pan + zoom nativi attorno al canvas. Parte leggermente "zoomato out"
-        // così si intravede l'insieme; boundaryMargin per trascinare ai bordi.
         return InteractiveViewer(
-          minScale: 0.2,
-          maxScale: 3.0,
-          boundaryMargin: const EdgeInsets.all(120),
-          constrained: false,
+          minScale: 0.5,
+          maxScale: 4.0,
+          boundaryMargin: const EdgeInsets.all(80),
           child: SizedBox(
             width: size.width,
             height: size.height,
             child: Stack(
               children: [
-                // Archi (linee) sotto i nodi.
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: GraphEdgesPainter(
-                      edges: graph.edges,
-                      positions: positions,
-                    ),
+                // Archi (linee) sotto i nodi. CustomPaint con size ESPLICITA: sotto
+                // i vincoli illimitati di InteractiveViewer(constrained:false) un
+                // Positioned.fill non dimensiona lo Stack e l'intera vista collassa
+                // a zero (schermata vuota). La size esplicita evita il collasso.
+                CustomPaint(
+                  size: size,
+                  painter: GraphEdgesPainter(
+                    edges: graph.edges,
+                    positions: positions,
                   ),
                 ),
                 // Nodi: chip centrati sulla loro posizione. Tap su una PERSONA
