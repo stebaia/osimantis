@@ -147,17 +147,21 @@ class _GraphCanvasState extends State<_GraphCanvas> {
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
 
-        // Spazio di disegno GRANDE e quadrato: i nodi vivono al centro con aria
-        // attorno e l'intero spazio è liberamente navigabile. La "stanza" per
-        // nodo è contenuta (~180px) così le forze li distribuiscono davvero in 2D
-        // invece di lasciarli in fila (con troppo spazio le forze non agiscono e
-        // resta solo la separazione minima, che li allinea).
-        final side = math.max(
-          math.max(viewport.width, viewport.height),
-          widget.graph.nodes.length * 180.0,
-        );
-        final canvas = Size(side, side);
-        final positions = forceDirectedLayout(widget.graph, canvas);
+        // Il layout RIEMPIE l'area che gli si dà (la separazione spinge i nodi
+        // fino ai bordi). Per avere un cluster COMPATTO e leggibile gli diamo
+        // un'area piccola, dimensionata sul numero di nodi e sulla separazione
+        // minima (~150px a nodo, area ∝ √n): abbastanza da non accavallarli, non
+        // così tanta da spargerli. Il cluster è poi centrato in un canvas più
+        // grande che fa da spazio navigabile (pan/zoom liberi).
+        final cluster = 150.0 * (1 + math.sqrt(widget.graph.nodes.length.toDouble()));
+        final canvas = Size(cluster * 3, cluster * 3); // spazio attorno per pan
+        final raw = forceDirectedLayout(widget.graph, Size(cluster, cluster));
+        // Sposta il cluster al centro del canvas grande.
+        final shift = (canvas.width - cluster) / 2;
+        final positions = {
+          for (final e in raw.entries)
+            e.key: e.value.translate(shift, shift),
+        };
 
         // Vista iniziale: inquadra l'area dei nodi a dimensione leggibile.
         WidgetsBinding.instance.addPostFrameCallback((_) {
