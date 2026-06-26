@@ -282,13 +282,76 @@ func TestRunAgentNudgesOnMissingEvent(t *testing.T) {
 	}
 }
 
-// La rete scatta UNA sola volta: se anche dopo il nudge il modello continua a
-// promettere senza eseguire, la risposta viene comunque accettata (no loop).
-func TestRunAgentNudgesAtMostOnce(t *testing.T) {
+// Il bug dei messaggi fitti: il modello crea PIÙ persone e poi risponde senza
+// averle collegate. La safety net deve accorgersi che manca link_nodes (lacuna
+// strutturale, a prescindere dal testo) e reiniettare linkNudge; al giro dopo il
+// modello esegue il collegamento.
+func TestRunAgentNudgesMissingLinks(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		// 1° giro: crea due persone in un colpo, niente link.
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{
+			{Name: "upsert_person", Args: map[string]any{"name": "Federica Mondini"}},
+			{Name: "upsert_person", Args: map[string]any{"name": "Michela Magalotti"}},
+		}},
+		// 2° giro: risponde come se avesse finito → deve scattare linkNudge.
+		{Role: llm.RoleModel, Text: "Ok, le ho aggiunte!"},
+		// 3° giro (dopo il nudge): collega Federica a Visa.
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{
+			{Name: "link_nodes", Args: map[string]any{"from_id": 16, "to_id": 3, "type": "ragazza_di"}},
+		}},
+		// 4° giro: risposta finale.
+		{Role: llm.RoleModel, Text: "Fatto, segnato tutto."},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "al rift c'erano fede e michi", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Fatto, segnato tutto." {
+		t.Errorf("reply = %q", reply)
+	}
+	foundLink := false
+	for _, c := range exec.called {
+		if c == "link_nodes" {
+			foundLink = true
+		}
+	}
+	if !foundLink {
+		t.Errorf("link_nodes non eseguito grazie al nudge: tool chiamati = %v", exec.called)
+	}
+}
+
+// missingActionNudge: casi limite del rilevamento "link mancante".
+func TestMissingActionNudgeLinks(t *testing.T) {
+	// Due persone create, nessun link → scatta linkNudge.
+	if got := missingActionNudge("ok!", map[string]int{"upsert_person": 2}); got != linkNudge {
+		t.Errorf("due persone senza link: atteso linkNudge, ottenuto %q", got)
+	}
+	// Persona + luogo, nessun link → scatta comunque (conteggio combinato).
+	if got := missingActionNudge("ok!", map[string]int{"upsert_person": 1, "upsert_place": 1}); got != linkNudge {
+		t.Errorf("persona+luogo senza link: atteso linkNudge, ottenuto %q", got)
+	}
+	// Una sola persona: inserimento isolato legittimo, niente richiamo.
+	if got := missingActionNudge("ok!", map[string]int{"upsert_person": 1}); got != "" {
+		t.Errorf("una sola persona: atteso nessun nudge, ottenuto %q", got)
+	}
+	// Più persone MA con un link già fatto → niente richiamo.
+	if got := missingActionNudge("ok!", map[string]int{"upsert_person": 2, "link_nodes": 1}); got != "" {
+		t.Errorf("persone con link: atteso nessun nudge, ottenuto %q", got)
+	}
+}
+
+// La rete scatta al massimo maxNudges (2) volte: se anche dopo i richiami il
+// modello continua a promettere senza eseguire, la risposta viene comunque
+// accettata (no loop infinito).
+func TestRunAgentNudgesAtMostMax(t *testing.T) {
 	client := &mockLLM{responses: []llm.Turn{
 		{Role: llm.RoleModel, Text: "Ho segnato! Me lo ricordo."},
-		// Dopo il nudge promette di nuovo senza scrivere: deve essere accettata.
+		// Dopo il 1° nudge promette di nuovo senza scrivere → 2° nudge.
 		{Role: llm.RoleModel, Text: "Ho segnato davvero stavolta."},
+		// Dopo il 2° nudge promette ancora: cap raggiunto, accettata così com'è.
+		{Role: llm.RoleModel, Text: "Ho segnato, giuro."},
 	}}
 	exec := &mockExecutor{}
 
@@ -296,11 +359,12 @@ func TestRunAgentNudgesAtMostOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAgent: %v", err)
 	}
-	if reply != "Ho segnato davvero stavolta." {
+	if reply != "Ho segnato, giuro." {
 		t.Errorf("reply = %q", reply)
 	}
-	if client.calls != 2 {
-		t.Errorf("chiamate LLM = %d, attese 2 (un solo nudge)", client.calls)
+	// 1 chiamata iniziale + 2 dopo i due nudge = 3.
+	if client.calls != 3 {
+		t.Errorf("chiamate LLM = %d, attese 3 (due nudge, poi cap)", client.calls)
 	}
 }
 

@@ -20,6 +20,12 @@ import (
 // limite prima della risposta finale. 10 dà margine senza rinunciare alla guardia.
 const maxIterations = 10
 
+// maxNudges limita quante volte per turno la safety net può reiniettare un
+// richiamo. Un messaggio fitto può avere più lacune insieme (persone create ma
+// non collegate E evento non registrato): due richiami le coprono entrambe senza
+// rischiare un ping-pong infinito con il modello.
+const maxNudges = 2
+
 // ToolExecutor esegue un tool per nome. Lo introduciamo come interfaccia (invece
 // di dipendere direttamente da tools.Registry + *pgxpool.Pool) così l'agente è
 // testabile con un executor finto, senza database.
@@ -49,12 +55,14 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 	history = append(history, llm.Turn{Role: llm.RoleUser, Text: userText})
 
 	emptyResponses := 0
-	// called tiene traccia di quali tool sono stati eseguiti nel turno: la safety
-	// net confronta ciò che la risposta PROMETTE con ciò che è stato fatto davvero.
-	called := map[string]bool{}
-	// nudged: la safety net può scattare UNA sola volta per turno (qualunque sia il
-	// motivo), così non si rischiano richiami a catena.
-	nudged := false
+	// calls conta quante volte ciascun tool è stato eseguito nel turno: la safety
+	// net confronta ciò che è stato fatto davvero (e quanto) con ciò che il
+	// messaggio implicava e la risposta PROMETTE.
+	calls := map[string]int{}
+	// nudges: la safety net può scattare al massimo maxNudges volte per turno, così
+	// copre più lacune (es. prima i link, poi l'evento) senza richiami a catena
+	// infiniti.
+	nudges := 0
 	for iter := 0; iter < maxIterations; iter++ {
 		turn, err := client.Chat(ctx, history, toolDefs)
 		if err != nil {
@@ -86,9 +94,9 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 			//   - promessa di aver registrato un EVENTO/incontro MA add_event non
 			//     chiamato (caso tipico: crea le persone ma tronca prima dell'evento).
 			// Un solo nudge per turno (nudged) per non rischiare richiami a catena.
-			if !nudged {
-				if nudge := missingActionNudge(turn.Text, called); nudge != "" {
-					nudged = true
+			if nudges < maxNudges {
+				if nudge := missingActionNudge(turn.Text, calls); nudge != "" {
+					nudges++
 					history = append(history, turn)
 					history = append(history, llm.Turn{Role: llm.RoleUser, Text: nudge})
 					continue
@@ -103,7 +111,7 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 
 		results := make([]llm.ToolResult, 0, len(turn.ToolCalls))
 		for _, call := range turn.ToolCalls {
-			called[call.Name] = true
+			calls[call.Name]++
 			results = append(results, executeTool(ctx, exec, call))
 		}
 		history = append(history, llm.Turn{Role: llm.RoleTool, ToolResults: results})
@@ -136,28 +144,53 @@ const (
 		`chiamato add_event in questo turno: l'evento NON è stato salvato. Chiama ORA ` +
 		`add_event con il testo grezzo, tutti i partecipanti (gli id delle persone ` +
 		`coinvolte) e l'eventuale luogo, poi rispondi.`
+	// linkNudge: hai creato/aggiornato più persone o luoghi ma non li hai collegati.
+	// Quando un messaggio nomina più entità insieme, quasi sempre c'è una relazione
+	// tra loro (es. "Federica, la ragazza di Visa") o un evento che le unisce: se
+	// non è stato chiamato link_nodes, è quasi certo che manchino le relazioni.
+	linkNudge = `In questo turno hai creato o aggiornato più persone/luoghi ma non hai ` +
+		`chiamato link_nodes nemmeno una volta: le relazioni tra loro NON sono state ` +
+		`salvate. Rileggi il messaggio dell'utente ed estrai TUTTE le relazioni tra le ` +
+		`entità che hai gestito (es. "X è la ragazza di Y", "Z lavora a W", "K frequenta ` +
+		`il locale J"). Chiama ORA link_nodes per ciascuna relazione, usando gli id dei ` +
+		`nodi coinvolti, e registra anche l'eventuale evento con add_event. Poi rispondi.`
 )
 
-// missingActionNudge confronta ciò che la risposta finale PROMETTE con i tool
-// effettivamente eseguiti (called) e, se manca l'azione corrispondente,
-// restituisce il richiamo da reiniettare. Stringa vuota = nessuna incoerenza.
+// missingActionNudge confronta ciò che è stato fatto davvero nel turno (calls,
+// con il conteggio per tool) e ciò che la risposta finale PROMETTE; se manca
+// l'azione corrispondente restituisce il richiamo da reiniettare. Stringa vuota
+// = nessuna incoerenza.
 //
-// L'ordine conta: il caso "evento mancante" è più specifico e va controllato
-// prima di quello generico "non ha scritto nulla".
-func missingActionNudge(text string, called map[string]bool) string {
-	if promisesEvent(text) && !called["add_event"] {
+// L'ordine conta, dal più specifico al più generico:
+//  1. evento promesso ma add_event mancante;
+//  2. più entità create ma nessun link (lacuna strutturale, indipendente dal
+//     testo della risposta: è il fallimento tipico dei messaggi fitti);
+//  3. salvataggio promesso ma nessuna scrittura affatto.
+func missingActionNudge(text string, calls map[string]int) string {
+	if promisesEvent(text) && calls["add_event"] == 0 {
 		return eventNudge
 	}
-	if promisesSave(text) && !hasWrite(called) {
+	if createdMultipleNodes(calls) && calls["link_nodes"] == 0 {
+		return linkNudge
+	}
+	if promisesSave(text) && !hasWrite(calls) {
 		return saveNudge
 	}
 	return ""
 }
 
+// createdMultipleNodes dice se nel turno sono state create/aggiornate almeno due
+// persone o luoghi (in qualunque combinazione). Sotto le due entità non scatta il
+// richiamo sui link: un singolo inserimento isolato è legittimo, e pretendere un
+// collegamento genererebbe falsi positivi.
+func createdMultipleNodes(calls map[string]int) bool {
+	return calls["upsert_person"]+calls["upsert_place"] >= 2
+}
+
 // hasWrite dice se nel turno è stato eseguito almeno un tool di scrittura.
-func hasWrite(called map[string]bool) bool {
-	for name := range called {
-		if writeTools[name] {
+func hasWrite(calls map[string]int) bool {
+	for name, n := range calls {
+		if n > 0 && writeTools[name] {
 			return true
 		}
 	}
