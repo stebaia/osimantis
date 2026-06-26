@@ -120,7 +120,7 @@ class _GraphCanvasState extends State<_GraphCanvas> {
       maxX = math.max(maxX, p.dx);
       maxY = math.max(maxY, p.dy);
     }
-    const margin = 110.0; // mezza larghezza chip + aria
+    const margin = 50.0; // mezza larghezza chip + un filo d'aria
     minX -= margin;
     minY -= margin;
     maxX += margin;
