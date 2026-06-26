@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -89,15 +91,22 @@ class _GraphCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        // Il canvas è più GRANDE del viewport: i chip dei nodi sono larghi
+        // (~150px), quindi su pochi pixel si accavallerebbero. Diamo spazio in
+        // proporzione al numero di nodi e lasciamo che l'utente esplori con
+        // pan/zoom (InteractiveViewer). ~220px di "stanza" per nodo.
+        final room = graph.nodes.length * 220.0;
+        final canvasW = math.max(constraints.maxWidth, room);
+        final canvasH = math.max(constraints.maxHeight, room);
+        final size = Size(canvasW, canvasH);
         final positions = forceDirectedLayout(graph, size);
 
-        // Pan + zoom nativi attorno al canvas. boundaryMargin generoso così si
-        // può trascinare anche oltre i bordi senza incastrarsi.
+        // Pan + zoom nativi attorno al canvas. Parte leggermente "zoomato out"
+        // così si intravede l'insieme; boundaryMargin per trascinare ai bordi.
         return InteractiveViewer(
-          minScale: 0.5,
+          minScale: 0.2,
           maxScale: 3.0,
-          boundaryMargin: const EdgeInsets.all(200),
+          boundaryMargin: const EdgeInsets.all(120),
           constrained: false,
           child: SizedBox(
             width: size.width,

@@ -3,6 +3,11 @@ import 'dart:ui';
 
 import '../../domain/entities/graph_data.dart';
 
+/// Forza dell'attrazione verso il centro applicata a ogni nodo a ogni passo.
+/// Piccola: deve solo impedire ai nodi isolati di fuggire ai bordi, senza
+/// schiacciare il grafo in un punto.
+const double _gravity = 0.03;
+
 /// Calcola le posizioni dei nodi con un layout force-directed (Fruchterman–
 /// Reingold semplificato), in UNA passata one-shot: simula per [iterations] passi
 /// e restituisce le posizioni finali normalizzate dentro [size]. NON è
@@ -20,7 +25,7 @@ Map<int, Offset> forceDirectedLayout(
   Size size, {
   int iterations = 300,
   int seed = 1,
-  double padding = 56,
+  double padding = 90,
 }) {
   final nodes = graph.nodes;
   if (nodes.isEmpty) return const {};
@@ -30,7 +35,9 @@ Map<int, Offset> forceDirectedLayout(
 
   final area = size.width * size.height;
   // Distanza "ideale" tra nodi collegati (k): cresce con l'area, cala col numero.
-  final k = 0.75 * math.sqrt(area / nodes.length);
+  // Il fattore 1.3 (>1) dà respiro: i nodi sono chip larghi ~150px, non punti,
+  // quindi serve più spazio tra i centri per non farli toccare.
+  final k = 1.3 * math.sqrt(area / nodes.length);
 
   final rnd = math.Random(seed);
   // Posizioni iniziali sparse ma deterministiche.
@@ -103,6 +110,16 @@ Map<int, Offset> forceDirectedLayout(
       disp[e.to]!
         ..x += fx
         ..y += fy;
+    }
+
+    // Gravità verso il centro: senza questa, i nodi SENZA archi (isolati) sono
+    // soggetti solo alla repulsione e schizzano ai bordi. Una leggera attrazione
+    // verso (0,0) li tiene raccolti e compatta l'intero grafo.
+    for (final n in nodes) {
+      final p = pos[n.id]!;
+      disp[n.id]!
+        ..x -= p.x * _gravity
+        ..y -= p.y * _gravity;
     }
 
     // Applica gli spostamenti, limitati dalla temperatura.

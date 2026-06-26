@@ -19,7 +19,7 @@ class GraphEdgesPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = AppColors.primary.withValues(alpha: 0.35)
+      ..color = AppColors.primary.withValues(alpha: 0.55)
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
@@ -27,7 +27,7 @@ class GraphEdgesPainter extends CustomPainter {
       final a = positions[e.from];
       final b = positions[e.to];
       if (a == null || b == null) continue;
-      paint.strokeWidth = (e.weight.clamp(0.5, 4.0)) * 1.5;
+      paint.strokeWidth = (e.weight.clamp(0.5, 4.0)) * 2.0;
       canvas.drawLine(a, b, paint);
     }
   }
