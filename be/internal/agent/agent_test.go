@@ -152,6 +152,99 @@ func TestRunAgentToolErrorContinues(t *testing.T) {
 	}
 }
 
+// SAFETY NET — promessa vuota: il modello conferma di aver salvato ("Ho segnato!")
+// senza aver eseguito alcuna scrittura. Il loop deve reiniettare il richiamo e
+// dare al modello un altro giro, in cui esegue davvero il tool di scrittura.
+func TestRunAgentNudgesOnEmptySavePromise(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		// 1° giro: promette senza scrivere.
+		{Role: llm.RoleModel, Text: "Ho segnato! Me lo ricordo."},
+		// 2° giro (dopo il nudge): esegue la scrittura.
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{{Name: "upsert_person", Args: map[string]any{"name": "Michela"}}}},
+		// 3° giro: risposta finale.
+		{Role: llm.RoleModel, Text: "Fatto davvero, Michela è salvata."},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "segna michela", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Fatto davvero, Michela è salvata." {
+		t.Errorf("reply = %q", reply)
+	}
+	if len(exec.called) != 1 || exec.called[0] != "upsert_person" {
+		t.Errorf("tool eseguiti = %v, atteso [upsert_person]", exec.called)
+	}
+	// Il nudge deve essere comparso nello storico come messaggio user.
+	last := client.histories[len(client.histories)-1]
+	foundNudge := false
+	for _, turn := range last {
+		if turn.Role == llm.RoleUser && turn.Text == saveNudge {
+			foundNudge = true
+		}
+	}
+	if !foundNudge {
+		t.Errorf("il nudge non è stato reiniettato nello storico: %+v", last)
+	}
+}
+
+// SAFETY NET — nessun falso richiamo se il modello HA scritto: conferma + tool di
+// scrittura eseguito → la risposta è accettata subito, niente nudge.
+func TestRunAgentNoNudgeWhenWroteAndPromised(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{{Name: "upsert_person", Args: map[string]any{"name": "Michela"}}}},
+		{Role: llm.RoleModel, Text: "Ho segnato Michela!"},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "segna michela", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Ho segnato Michela!" {
+		t.Errorf("reply = %q", reply)
+	}
+	if client.calls != 2 {
+		t.Errorf("chiamate LLM = %d, attese 2 (nessun nudge)", client.calls)
+	}
+}
+
+// SAFETY NET — nessun richiamo su una risposta di sola lettura che non promette
+// salvataggi: una domanda ("chi è Mura?") non deve mai innescare il nudge.
+func TestRunAgentNoNudgeOnReadOnlyReply(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		{Role: llm.RoleModel, Text: "Mura è Erik Muratori, un tuo amico."},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "chi è Mura?", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Mura è Erik Muratori, un tuo amico." {
+		t.Errorf("reply = %q", reply)
+	}
+	if client.calls != 1 {
+		t.Errorf("chiamate LLM = %d, attesa 1 (nessun nudge)", client.calls)
+	}
+}
+
+func TestPromisesSave(t *testing.T) {
+	saves := []string{"Ho segnato!", "Perfetto, me lo ricordo.", "Ok, ho aggiornato i dati.", "ora so che Mura è Erik"}
+	for _, s := range saves {
+		if !promisesSave(s) {
+			t.Errorf("promisesSave(%q) = false, atteso true", s)
+		}
+	}
+	reads := []string{"Mura è Erik Muratori.", "Chi intendi?", "Non ho trovato nulla."}
+	for _, s := range reads {
+		if promisesSave(s) {
+			t.Errorf("promisesSave(%q) = true, atteso false", s)
+		}
+	}
+}
+
 // Se il modello continua a chiedere tool all'infinito, il cap interviene.
 func TestRunAgentIterationCap(t *testing.T) {
 	loop := make([]llm.Turn, maxIterations+2)
