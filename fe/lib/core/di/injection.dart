@@ -6,6 +6,10 @@ import '../../features/chat/data/repositories/chat_repository_impl.dart';
 import '../../features/chat/domain/repositories/chat_repository.dart';
 import '../../features/chat/domain/usecases/send_message.dart';
 import '../../features/chat/presentation/bloc/chat_bloc.dart';
+import '../../features/graph/data/datasources/graph_remote_datasource.dart';
+import '../../features/graph/data/repositories/graph_repository_impl.dart';
+import '../../features/graph/domain/repositories/graph_repository.dart';
+import '../../features/graph/domain/usecases/get_graph.dart';
 import '../../features/person/data/datasources/person_remote_datasource.dart';
 import '../../features/person/data/repositories/person_repository_impl.dart';
 import '../../features/person/domain/repositories/person_repository.dart';
@@ -37,6 +41,13 @@ Future<void> configureDependencies() async {
 
   // Person — domain
   sl.registerLazySingleton(() => GetPerson(sl()));
+
+  // Graph — data
+  sl.registerLazySingleton(() => GraphRemoteDataSource(sl()));
+  sl.registerLazySingleton<GraphRepository>(() => GraphRepositoryImpl(sl()));
+
+  // Graph — domain
+  sl.registerLazySingleton(() => GetGraph(sl()));
 
   // Presentation
   sl.registerFactory(() => ChatBloc(sendMessage: sl(), getPerson: sl(), speech: sl()));

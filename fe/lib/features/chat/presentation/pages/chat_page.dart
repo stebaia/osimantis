@@ -78,18 +78,20 @@ class _ChatViewState extends State<_ChatView> {
     });
   }
 
+  /// Chiude la tastiera togliendo il focus: il listener su _inputFocus rimette
+  /// _inputVisible = false e nasconde il composer. unfocus() chiude anche la
+  /// tastiera di sistema.
+  void _closeKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _inputFocus.unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final keyboardOpen = _inputVisible;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: _circleButton(Icons.menu, () {}),
-        actions: [_circleButton(Icons.add, () {})],
-      ),
-      // Swipe verso l'alto su TUTTA la schermata → apre la tastiera. A livello di
-      // schermata non c'è long-press che compete, quindi un GestureDetector
-      // semplice basta; opaque copre anche le aree vuote.
+      
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onVerticalDragEnd: (d) {
@@ -105,35 +107,40 @@ class _ChatViewState extends State<_ChatView> {
             );
           },
           builder: (context, state) {
-            // Blob compatto in alto quando c'è una scheda o la tastiera è aperta;
-            // altrimenti grande e centrale.
-            final compact = keyboardOpen || state.activePerson != null;
+            void hold(bool on) => context
+                .read<ChatBloc>()
+                .add(ChatListeningToggled(listening: on));
 
             return Column(
               children: [
-                if (compact)
+                // Header del blob: mini-barra a tastiera aperta, compatto se c'è
+                // una scheda, grande e centrale altrimenti.
+                if (keyboardOpen)
+                  _BlobMiniBar(
+                    state: state,
+                    onHoldStart: () => hold(true),
+                    onHoldEnd: () => hold(false),
+                  )
+                else if (state.activePerson != null)
                   _BlobHeader(
                     state: state,
                     onSwipeUp: _openKeyboard,
-                    onHoldStart: () => context.read<ChatBloc>().add(
-                      const ChatListeningToggled(listening: true),
-                    ),
-                    onHoldEnd: () => context.read<ChatBloc>().add(
-                      const ChatListeningToggled(listening: false),
-                    ),
+                    onHoldStart: () => hold(true),
+                    onHoldEnd: () => hold(false),
                   ),
                 Expanded(
-                  child: compact
-                      ? _Body(state: state)
+                  child: keyboardOpen || state.activePerson != null
+                      // Tap fuori dal campo → chiude la tastiera.
+                      ? GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: keyboardOpen ? _closeKeyboard : null,
+                          child: _Body(state: state),
+                        )
                       : _BlobHero(
                           state: state,
                           onSwipeUp: _openKeyboard,
-                          onHoldStart: () => context.read<ChatBloc>().add(
-                            const ChatListeningToggled(listening: true),
-                          ),
-                          onHoldEnd: () => context.read<ChatBloc>().add(
-                            const ChatListeningToggled(listening: false),
-                          ),
+                          onHoldStart: () => hold(true),
+                          onHoldEnd: () => hold(false),
                         ),
                 ),
                 // I controlli di testo compaiono solo quando apriamo l'input
@@ -144,9 +151,7 @@ class _ChatViewState extends State<_ChatView> {
                     focusNode: _inputFocus,
                     state: state,
                     onSend: () => _send(context),
-                    onMic: () => context.read<ChatBloc>().add(
-                      ChatListeningToggled(listening: !state.isListening),
-                    ),
+                    onMic: () => hold(!state.isListening),
                   ),
               ],
             );
@@ -157,24 +162,6 @@ class _ChatViewState extends State<_ChatView> {
     );
   }
 
-  Widget _circleButton(IconData icon, VoidCallback onTap) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Material(
-        color: AppColors.surface,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: Icon(icon, color: AppColors.textPrimary, size: 22),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Gesture SUL BLOB: tap (apri tastiera) e press-and-hold (registra). Lo swipe-up
@@ -293,6 +280,61 @@ class _StopButton extends StatelessWidget {
 }
 
 /// Blob compatto in alto + stato (trascrizione live o hint).
+/// Barra sottile in alto a tastiera aperta: blob mini (~40px) + stato. Lascia il
+/// massimo spazio alla scheda e al campo di testo. Tieni premuto per registrare.
+class _BlobMiniBar extends StatelessWidget {
+  const _BlobMiniBar({
+    required this.state,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+  });
+
+  final ChatState state;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = state.isBusy;
+    final label = state.transcript.isNotEmpty
+        ? state.transcript
+        : state.isListening
+            ? 'Ascolto...'
+            : 'Tieni premuto per parlare';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Row(
+        children: [
+          _BlobGesture(
+            onTap: onHoldStart, // un tap sul mini-blob avvia comunque l'ascolto
+            onHoldStart: onHoldStart,
+            onHoldEnd: onHoldEnd,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: VoiceBlob(active: busy, size: 44),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+          ),
+          if (state.isListening)
+            IconButton(
+              onPressed: onHoldEnd,
+              icon: const Icon(Icons.stop_circle, color: AppColors.primary),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BlobHeader extends StatelessWidget {
   const _BlobHeader({
     required this.state,
