@@ -230,6 +230,95 @@ func TestRunAgentNoNudgeOnReadOnlyReply(t *testing.T) {
 	}
 }
 
+// SAFETY NET — evento mancante: il modello crea le persone e il legame (quindi
+// HA scritto), dice di aver registrato l'evento, ma non chiama add_event. La rete
+// deve scattare comunque (regola specifica sull'evento) e dare un altro giro in
+// cui esegue add_event.
+func TestRunAgentNudgesOnMissingEvent(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		// 1° giro: scrive le persone + il legame.
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{
+			{Name: "upsert_person", Args: map[string]any{"name": "Federica"}},
+			{Name: "upsert_person", Args: map[string]any{"name": "Michela"}},
+			{Name: "link_nodes", Args: map[string]any{"from_id": float64(9), "to_id": float64(3), "type": "partner"}},
+		}},
+		// 2° giro: promette l'evento ma non lo registra → deve scattare il nudge.
+		{Role: llm.RoleModel, Text: "Ho registrato l'evento al Rift e le persone."},
+		// 3° giro (dopo il nudge): esegue add_event.
+		{Role: llm.RoleModel, ToolCalls: []llm.ToolCall{
+			{Name: "add_event", Args: map[string]any{"raw_text": "al rift c'erano...", "participant_ids": []any{float64(9), float64(10)}}},
+		}},
+		// 4° giro: risposta finale.
+		{Role: llm.RoleModel, Text: "Fatto, evento al Rift salvato."},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "ieri al rift c'erano...", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Fatto, evento al Rift salvato." {
+		t.Errorf("reply = %q", reply)
+	}
+	// add_event deve essere stato eseguito grazie al nudge.
+	sawEvent := false
+	for _, c := range exec.called {
+		if c == "add_event" {
+			sawEvent = true
+		}
+	}
+	if !sawEvent {
+		t.Errorf("add_event non eseguito: tool chiamati = %v", exec.called)
+	}
+	last := client.histories[len(client.histories)-1]
+	foundNudge := false
+	for _, turn := range last {
+		if turn.Role == llm.RoleUser && turn.Text == eventNudge {
+			foundNudge = true
+		}
+	}
+	if !foundNudge {
+		t.Errorf("eventNudge non reiniettato: %+v", last)
+	}
+}
+
+// La rete scatta UNA sola volta: se anche dopo il nudge il modello continua a
+// promettere senza eseguire, la risposta viene comunque accettata (no loop).
+func TestRunAgentNudgesAtMostOnce(t *testing.T) {
+	client := &mockLLM{responses: []llm.Turn{
+		{Role: llm.RoleModel, Text: "Ho segnato! Me lo ricordo."},
+		// Dopo il nudge promette di nuovo senza scrivere: deve essere accettata.
+		{Role: llm.RoleModel, Text: "Ho segnato davvero stavolta."},
+	}}
+	exec := &mockExecutor{}
+
+	reply, err := RunAgent(context.Background(), client, exec, nil, "segna x", nil)
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+	if reply != "Ho segnato davvero stavolta." {
+		t.Errorf("reply = %q", reply)
+	}
+	if client.calls != 2 {
+		t.Errorf("chiamate LLM = %d, attese 2 (un solo nudge)", client.calls)
+	}
+}
+
+func TestPromisesEvent(t *testing.T) {
+	yes := []string{"Ho registrato l'evento al Rift.", "Ho segnato l'incontro di ieri.", "Ho salvato la serata."}
+	for _, s := range yes {
+		if !promisesEvent(s) {
+			t.Errorf("promisesEvent(%q) = false, atteso true", s)
+		}
+	}
+	no := []string{"Ho segnato Michela.", "Mura è un tuo amico.", "Ho aggiornato il lavoro di Erik."}
+	for _, s := range no {
+		if promisesEvent(s) {
+			t.Errorf("promisesEvent(%q) = true, atteso false", s)
+		}
+	}
+}
+
 func TestPromisesSave(t *testing.T) {
 	saves := []string{"Ho segnato!", "Perfetto, me lo ricordo.", "Ok, ho aggiornato i dati.", "ora so che Mura è Erik"}
 	for _, s := range saves {

@@ -49,11 +49,11 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 	history = append(history, llm.Turn{Role: llm.RoleUser, Text: userText})
 
 	emptyResponses := 0
-	// wrote diventa true appena il modello esegue un tool di SCRITTURA nel turno.
-	// Serve alla safety net: se la risposta finale promette di aver salvato
-	// qualcosa ma nessuna scrittura è avvenuta, è una promessa vuota.
-	wrote := false
-	// nudged evita di reiniettare il richiamo più di una volta (niente loop).
+	// called tiene traccia di quali tool sono stati eseguiti nel turno: la safety
+	// net confronta ciò che la risposta PROMETTE con ciò che è stato fatto davvero.
+	called := map[string]bool{}
+	// nudged: la safety net può scattare UNA sola volta per turno (qualunque sia il
+	// motivo), così non si rischiano richiami a catena.
 	nudged := false
 	for iter := 0; iter < maxIterations; iter++ {
 		turn, err := client.Chat(ctx, history, toolDefs)
@@ -77,17 +77,22 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 			if turn.Text == "" {
 				return "", fmt.Errorf("il modello ha restituito una risposta vuota")
 			}
-			// SAFETY NET: il modello a volte CONFERMA di aver salvato ("ho segnato",
-			// "me lo ricordo") senza aver eseguito alcuna scrittura — la promessa è
-			// vuota e l'utente crede che il dato sia salvato. Se la risposta promette
-			// un salvataggio ma in tutto il turno non c'è stata nessuna scrittura,
-			// reiniettiamo UNA volta un richiamo e lasciamo che il modello esegua
-			// davvero i tool. Una sola volta (nudged) per non rischiare loop.
-			if !wrote && !nudged && promisesSave(turn.Text) {
-				nudged = true
-				history = append(history, turn)
-				history = append(history, llm.Turn{Role: llm.RoleUser, Text: saveNudge})
-				continue
+			// SAFETY NET: il modello a volte CONFERMA a parole ciò che non ha fatto
+			// con i tool, e l'utente crede che il dato sia salvato. Confrontiamo la
+			// promessa della risposta con i tool effettivamente eseguiti e, se manca
+			// l'azione, reiniettiamo UNA volta un richiamo perché la esegua davvero.
+			// Due casi distinti:
+			//   - promessa di salvataggio MA nessuna scrittura affatto (promessa vuota);
+			//   - promessa di aver registrato un EVENTO/incontro MA add_event non
+			//     chiamato (caso tipico: crea le persone ma tronca prima dell'evento).
+			// Un solo nudge per turno (nudged) per non rischiare richiami a catena.
+			if !nudged {
+				if nudge := missingActionNudge(turn.Text, called); nudge != "" {
+					nudged = true
+					history = append(history, turn)
+					history = append(history, llm.Turn{Role: llm.RoleUser, Text: nudge})
+					continue
+				}
 			}
 			return turn.Text, nil
 		}
@@ -98,9 +103,7 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 
 		results := make([]llm.ToolResult, 0, len(turn.ToolCalls))
 		for _, call := range turn.ToolCalls {
-			if isWriteTool(call.Name) {
-				wrote = true
-			}
+			called[call.Name] = true
 			results = append(results, executeTool(ctx, exec, call))
 		}
 		history = append(history, llm.Turn{Role: llm.RoleTool, ToolResults: results})
@@ -109,19 +112,9 @@ func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs [
 	return "", fmt.Errorf("raggiunto il limite di %d iterazioni senza una risposta finale", maxIterations)
 }
 
-// saveNudge è il richiamo reiniettato dalla safety net: dice al modello che ha
-// confermato un salvataggio senza eseguire i tool, e gli chiede di farlo davvero.
-const saveNudge = `Hai confermato all'utente di aver salvato qualcosa, ma non hai ` +
-	`eseguito nessun tool di scrittura in questo turno. Una conferma senza azione ` +
-	`è una promessa vuota: l'utente crede che il dato sia salvato e non lo è. ` +
-	`Esegui ORA i tool necessari (find_node, upsert_person/upsert_place, link_nodes, ` +
-	`add_event) per tutte le persone, i luoghi, le relazioni e gli eventi del ` +
-	`messaggio, poi rispondi.`
-
-// writeTools sono i tool che modificano il grafo. La safety net e il tracking di
-// "ha scritto qualcosa" si basano su questo insieme. I tool di sola lettura
+// writeTools sono i tool che modificano il grafo. I tool di sola lettura
 // (find_node, get_user, get_neighbors, recent_events, prediction_features,
-// search_semantic) non contano come scrittura.
+// search_semantic) non ne fanno parte.
 var writeTools = map[string]bool{
 	"upsert_person": true,
 	"upsert_place":  true,
@@ -129,8 +122,47 @@ var writeTools = map[string]bool{
 	"add_event":     true,
 }
 
-// isWriteTool dice se un tool modifica il grafo.
-func isWriteTool(name string) bool { return writeTools[name] }
+// I richiami reiniettati dalla safety net, uno per ciascun caso.
+const (
+	// saveNudge: la risposta conferma un salvataggio ma non è stato scritto nulla.
+	saveNudge = `Hai confermato all'utente di aver salvato qualcosa, ma non hai ` +
+		`eseguito nessun tool di scrittura in questo turno. Una conferma senza azione ` +
+		`è una promessa vuota: l'utente crede che il dato sia salvato e non lo è. ` +
+		`Esegui ORA i tool necessari (find_node, upsert_person/upsert_place, link_nodes, ` +
+		`add_event) per tutte le persone, i luoghi, le relazioni e gli eventi del ` +
+		`messaggio, poi rispondi.`
+	// eventNudge: la risposta dice di aver registrato un evento ma add_event manca.
+	eventNudge = `Hai detto all'utente di aver registrato l'evento/incontro, ma non hai ` +
+		`chiamato add_event in questo turno: l'evento NON è stato salvato. Chiama ORA ` +
+		`add_event con il testo grezzo, tutti i partecipanti (gli id delle persone ` +
+		`coinvolte) e l'eventuale luogo, poi rispondi.`
+)
+
+// missingActionNudge confronta ciò che la risposta finale PROMETTE con i tool
+// effettivamente eseguiti (called) e, se manca l'azione corrispondente,
+// restituisce il richiamo da reiniettare. Stringa vuota = nessuna incoerenza.
+//
+// L'ordine conta: il caso "evento mancante" è più specifico e va controllato
+// prima di quello generico "non ha scritto nulla".
+func missingActionNudge(text string, called map[string]bool) string {
+	if promisesEvent(text) && !called["add_event"] {
+		return eventNudge
+	}
+	if promisesSave(text) && !hasWrite(called) {
+		return saveNudge
+	}
+	return ""
+}
+
+// hasWrite dice se nel turno è stato eseguito almeno un tool di scrittura.
+func hasWrite(called map[string]bool) bool {
+	for name := range called {
+		if writeTools[name] {
+			return true
+		}
+	}
+	return false
+}
 
 // promisesSave riconosce, in modo volutamente conservativo, le risposte che
 // AFFERMANO un salvataggio già avvenuto (es. "ho segnato", "me lo ricordo"). Non
@@ -145,6 +177,30 @@ func promisesSave(text string) bool {
 	}
 	for _, m := range markers {
 		if strings.Contains(t, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// promisesEvent riconosce le risposte che affermano di aver registrato un EVENTO
+// o un incontro (es. "ho registrato l'incontro", "ho segnato la serata"). È più
+// specifica di promisesSave: cerca un verbo di registrazione vicino a un termine
+// che indica un fatto accaduto.
+func promisesEvent(text string) bool {
+	t := strings.ToLower(text)
+	hasNoun := false
+	for _, n := range []string{"event", "incontro", "serata", "uscita", "aperitivo", "cena", "ritrovo"} {
+		if strings.Contains(t, n) {
+			hasNoun = true
+			break
+		}
+	}
+	if !hasNoun {
+		return false
+	}
+	for _, v := range []string{"ho registrato", "ho segnato", "ho salvato", "ho annotato", "registrato l", "segnato l"} {
+		if strings.Contains(t, v) {
 			return true
 		}
 	}
