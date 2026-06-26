@@ -41,12 +41,14 @@ void main() {
       }
     });
 
-    test('non sovrappone i nodi (distanza minima > 0)', () {
+    test('separa i nodi così i chip non si accavallano', () {
       final pos = forceDirectedLayout(_sampleGraph(), _size, seed: 3);
       final list = pos.values.toList();
       for (var i = 0; i < list.length; i++) {
         for (var j = i + 1; j < list.length; j++) {
-          expect((list[i] - list[j]).distance, greaterThan(8));
+          // La separazione minima imposta è ~120px; tolleriamo un piccolo margine
+          // per i nodi spinti contro i bordi dal clamp.
+          expect((list[i] - list[j]).distance, greaterThan(100));
         }
       }
     });

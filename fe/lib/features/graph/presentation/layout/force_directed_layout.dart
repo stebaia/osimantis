@@ -25,7 +25,7 @@ Map<int, Offset> forceDirectedLayout(
   Size size, {
   int iterations = 300,
   int seed = 1,
-  double padding = 90,
+  double padding = 48,
 }) {
   final nodes = graph.nodes;
   if (nodes.isEmpty) return const {};
@@ -137,7 +137,61 @@ Map<int, Offset> forceDirectedLayout(
     temp = math.max(temp - cooling, 0.0);
   }
 
-  return _normalize(pos, size, padding);
+  final placed = _normalize(pos, size, padding);
+  // Le forze trattano i nodi come PUNTI, ma i chip sono larghi (~160px): i nodi
+  // connessi collassavano in un mucchio sovrapposto. Qui, in pixel reali del
+  // canvas, separiamo a forza ogni coppia troppo vicina fino a [_minSeparation],
+  // così i chip non si accavallano più. Poche passate bastano a sciogliere i
+  // grovigli senza spingere nessuno fuori dai bordi.
+  return _separate(placed, size, padding);
+}
+
+/// Distanza minima imposta tra i CENTRI dei nodi, in pixel. Tarata sulla
+/// larghezza tipica dei chip così non si sovrappongono.
+const double _minSeparation = 120;
+
+/// Spinge via le coppie di nodi più vicine di [_minSeparation], iterando qualche
+/// passata, e ri-clampa dentro i bordi (con [padding]).
+Map<int, Offset> _separate(Map<int, Offset> input, Size size, double padding) {
+  final ids = input.keys.toList(growable: false);
+  final p = Map<int, Offset>.from(input);
+
+  Offset clampIn(Offset o) => Offset(
+        o.dx.clamp(padding, size.width - padding),
+        o.dy.clamp(padding, size.height - padding),
+      );
+
+  for (var pass = 0; pass < 30; pass++) {
+    var moved = false;
+    for (var i = 0; i < ids.length; i++) {
+      for (var j = i + 1; j < ids.length; j++) {
+        final a = p[ids[i]]!;
+        final b = p[ids[j]]!;
+        var dx = a.dx - b.dx;
+        var dy = a.dy - b.dy;
+        var dist = math.sqrt(dx * dx + dy * dy);
+        if (dist >= _minSeparation) continue;
+        if (dist < 0.01) {
+          // Esattamente sovrapposti: separazione deterministica.
+          dx = (i - j).toDouble();
+          dy = 1;
+          dist = math.sqrt(dx * dx + dy * dy);
+        }
+        final push = (_minSeparation - dist) / 2;
+        final ux = dx / dist;
+        final uy = dy / dist;
+        // Clampa SUBITO dentro i bordi, così separazione e bordi convergono
+        // insieme invece di combattersi (un clamp finale annullerebbe la
+        // separazione vicino ai bordi).
+        p[ids[i]] = clampIn(a.translate(ux * push, uy * push));
+        p[ids[j]] = clampIn(b.translate(-ux * push, -uy * push));
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  return p;
 }
 
 /// Riscala le posizioni grezze dentro [size] con un margine [padding].
