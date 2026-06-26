@@ -104,20 +104,38 @@ class _GraphCanvasState extends State<_GraphCanvas> {
     super.dispose();
   }
 
-  /// Imposta UNA volta la trasformazione iniziale così l'intero canvas entra nel
-  /// viewport, centrato (zoom-to-fit). Dopo, l'utente è libero di pan/zoom.
-  void _fitToViewport(Size viewport, Size canvas) {
-    if (_fitted) return;
+  /// Imposta UNA volta la vista iniziale così l'AREA OCCUPATA DAI NODI (non
+  /// l'intero canvas, che è molto più grande per la navigazione) entra nel
+  /// viewport, centrata. Dopo, l'utente è libero di pan/zoom nello spazio.
+  void _fitToNodes(Size viewport, Map<int, Offset> positions) {
+    if (_fitted || positions.isEmpty) return;
     _fitted = true;
-    // Scala per far stare il canvas nel viewport, con un piccolo margine.
+
+    // Bounding box dei nodi, con un margine per non incollarli ai bordi.
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = -double.infinity, maxY = -double.infinity;
+    for (final p in positions.values) {
+      minX = math.min(minX, p.dx);
+      minY = math.min(minY, p.dy);
+      maxX = math.max(maxX, p.dx);
+      maxY = math.max(maxY, p.dy);
+    }
+    const margin = 110.0; // mezza larghezza chip + aria
+    minX -= margin;
+    minY -= margin;
+    maxX += margin;
+    maxY += margin;
+    final boxW = math.max(maxX - minX, 1);
+    final boxH = math.max(maxY - minY, 1);
+
+    // Scala per inquadrare il box, ma MAI ingrandire oltre 1.0 (chip leggibili).
     final scale = math.min(
-          viewport.width / canvas.width,
-          viewport.height / canvas.height,
-        ) *
-        0.92;
-    // Centra: trasla così il centro del canvas cada al centro del viewport.
-    final dx = (viewport.width - canvas.width * scale) / 2;
-    final dy = (viewport.height - canvas.height * scale) / 2;
+      1.0,
+      math.min(viewport.width / boxW, viewport.height / boxH),
+    );
+    // Centra il box nel viewport.
+    final dx = (viewport.width - boxW * scale) / 2 - minX * scale;
+    final dy = (viewport.height - boxH * scale) / 2 - minY * scale;
     _controller.value = Matrix4.identity()
       ..translateByDouble(dx, dy, 0, 1)
       ..scaleByDouble(scale, scale, 1, 1);
@@ -130,19 +148,20 @@ class _GraphCanvasState extends State<_GraphCanvas> {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
 
         // Spazio di disegno GRANDE e quadrato: i nodi vivono al centro con aria
-        // attorno, e l'intero spazio è liberamente navigabile (pan/zoom) senza
-        // bordi che taglino i chip. ~320px di "stanza" per nodo, con un minimo.
+        // attorno e l'intero spazio è liberamente navigabile. La "stanza" per
+        // nodo è contenuta (~180px) così le forze li distribuiscono davvero in 2D
+        // invece di lasciarli in fila (con troppo spazio le forze non agiscono e
+        // resta solo la separazione minima, che li allinea).
         final side = math.max(
           math.max(viewport.width, viewport.height),
-          widget.graph.nodes.length * 320.0,
+          widget.graph.nodes.length * 180.0,
         );
         final canvas = Size(side, side);
         final positions = forceDirectedLayout(widget.graph, canvas);
 
-        // Vista iniziale: scala e centra lo spazio così tutti i nodi sono visibili
-        // all'apertura (zoom-to-fit). Senza, partiremmo su un angolo vuoto.
+        // Vista iniziale: inquadra l'area dei nodi a dimensione leggibile.
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _fitToViewport(viewport, canvas);
+          _fitToNodes(viewport, positions);
         });
 
         return InteractiveViewer(
