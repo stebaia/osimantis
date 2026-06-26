@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -83,46 +85,90 @@ class _GraphView extends StatelessWidget {
   }
 }
 
-class _GraphCanvas extends StatelessWidget {
+class _GraphCanvas extends StatefulWidget {
   const _GraphCanvas({required this.graph, this.highlightIds = const {}});
   final GraphData graph;
   final Set<int> highlightIds;
 
   @override
+  State<_GraphCanvas> createState() => _GraphCanvasState();
+}
+
+class _GraphCanvasState extends State<_GraphCanvas> {
+  final _controller = TransformationController();
+  bool _fitted = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Imposta UNA volta la trasformazione iniziale così l'intero canvas entra nel
+  /// viewport, centrato (zoom-to-fit). Dopo, l'utente è libero di pan/zoom.
+  void _fitToViewport(Size viewport, Size canvas) {
+    if (_fitted) return;
+    _fitted = true;
+    // Scala per far stare il canvas nel viewport, con un piccolo margine.
+    final scale = math.min(
+          viewport.width / canvas.width,
+          viewport.height / canvas.height,
+        ) *
+        0.92;
+    // Centra: trasla così il centro del canvas cada al centro del viewport.
+    final dx = (viewport.width - canvas.width * scale) / 2;
+    final dy = (viewport.height - canvas.height * scale) / 2;
+    _controller.value = Matrix4.identity()
+      ..translateByDouble(dx, dy, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Il canvas riempie ESATTAMENTE il viewport: così all'apertura tutti i
-        // nodi sono visibili senza bisogno di zoom-to-fit. Il layout li dispone
-        // dentro questi confini (con padding interno per non sbordare). L'utente
-        // può comunque fare pinch-zoom e pan per avvicinarsi (constrained:true,
-        // niente canvas gigante che lasciava la vista iniziale su un angolo vuoto).
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-        final positions = forceDirectedLayout(graph, size);
+        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+
+        // Spazio di disegno GRANDE e quadrato: i nodi vivono al centro con aria
+        // attorno, e l'intero spazio è liberamente navigabile (pan/zoom) senza
+        // bordi che taglino i chip. ~320px di "stanza" per nodo, con un minimo.
+        final side = math.max(
+          math.max(viewport.width, viewport.height),
+          widget.graph.nodes.length * 320.0,
+        );
+        final canvas = Size(side, side);
+        final positions = forceDirectedLayout(widget.graph, canvas);
+
+        // Vista iniziale: scala e centra lo spazio così tutti i nodi sono visibili
+        // all'apertura (zoom-to-fit). Senza, partiremmo su un angolo vuoto.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _fitToViewport(viewport, canvas);
+        });
 
         return InteractiveViewer(
-          minScale: 0.5,
+          transformationController: _controller,
+          minScale: 0.1,
           maxScale: 4.0,
-          boundaryMargin: const EdgeInsets.all(80),
+          // boundaryMargin enorme = spazio "infinito" navigabile in ogni direzione.
+          boundaryMargin: const EdgeInsets.all(double.infinity),
+          constrained: false,
+          clipBehavior: Clip.none,
           child: SizedBox(
-            width: size.width,
-            height: size.height,
+            width: canvas.width,
+            height: canvas.height,
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                // Archi (linee) sotto i nodi. CustomPaint con size ESPLICITA: sotto
-                // i vincoli illimitati di InteractiveViewer(constrained:false) un
-                // Positioned.fill non dimensiona lo Stack e l'intera vista collassa
-                // a zero (schermata vuota). La size esplicita evita il collasso.
                 CustomPaint(
-                  size: size,
+                  size: canvas,
                   painter: GraphEdgesPainter(
-                    edges: graph.edges,
+                    edges: widget.graph.edges,
                     positions: positions,
                   ),
                 ),
                 // Nodi: chip centrati sulla loro posizione. Tap su una PERSONA
                 // apre la sua scheda; i luoghi non hanno scheda → no-op.
-                for (final node in graph.nodes)
+                for (final node in widget.graph.nodes)
                   if (positions[node.id] case final p?)
                     Positioned(
                       left: p.dx,
@@ -131,7 +177,7 @@ class _GraphCanvas extends StatelessWidget {
                         translation: const Offset(-0.5, -0.5),
                         child: NodeChip(
                           node: node,
-                          highlighted: highlightIds.contains(node.id),
+                          highlighted: widget.highlightIds.contains(node.id),
                           onTap: node.isPerson
                               ? () => _openPersonCard(context, node.id)
                               : () {},
