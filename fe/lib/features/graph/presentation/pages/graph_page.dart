@@ -18,19 +18,24 @@ import '../widgets/node_chip.dart';
 /// Step 2 (render statico): posizioni iniziali a cerchio, archi disegnati con
 /// CustomPaint, nodi come chip. Pan/zoom e tap arrivano negli step successivi.
 class GraphPage extends StatelessWidget {
-  const GraphPage({super.key});
+  const GraphPage({super.key, this.highlightIds = const {}});
+
+  /// Id dei nodi da evidenziare all'apertura (es. le persone toccate dall'ultimo
+  /// messaggio, o il nodo da cui si è aperto "vedi nel grafo").
+  final Set<int> highlightIds;
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => GraphBloc(getGraph: sl())..add(const GraphLoadRequested()),
-      child: const _GraphView(),
+      child: _GraphView(highlightIds: highlightIds),
     );
   }
 }
 
 class _GraphView extends StatelessWidget {
-  const _GraphView();
+  const _GraphView({required this.highlightIds});
+  final Set<int> highlightIds;
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +69,10 @@ class _GraphView extends StatelessWidget {
                   ),
                 );
               }
-              return _GraphCanvas(graph: state.graph);
+              return _GraphCanvas(
+                graph: state.graph,
+                highlightIds: highlightIds,
+              );
           }
         },
       ),
@@ -73,8 +81,9 @@ class _GraphView extends StatelessWidget {
 }
 
 class _GraphCanvas extends StatelessWidget {
-  const _GraphCanvas({required this.graph});
+  const _GraphCanvas({required this.graph, this.highlightIds = const {}});
   final GraphData graph;
+  final Set<int> highlightIds;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +124,7 @@ class _GraphCanvas extends StatelessWidget {
                         translation: const Offset(-0.5, -0.5),
                         child: NodeChip(
                           node: node,
+                          highlighted: highlightIds.contains(node.id),
                           onTap: node.isPerson
                               ? () => _openPersonCard(context, node.id)
                               : () {},

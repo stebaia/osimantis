@@ -6,9 +6,14 @@ import '../../domain/entities/person_card.dart';
 /// Scheda persona: si compone progressivamente man mano che l'utente racconta.
 /// Header (avatar + nome + alias), dati liberi, legami, eventi recenti.
 class PersonCardView extends StatelessWidget {
-  const PersonCardView({super.key, required this.person});
+  const PersonCardView({super.key, required this.person, this.onShowInGraph});
 
   final PersonCard person;
+
+  /// Se passato, mostra un'azione "vedi nel grafo" in cima alla scheda. Opzionale
+  /// così la scheda resta riusabile dove il grafo non serve (es. dentro il grafo
+  /// stesso).
+  final VoidCallback? onShowInGraph;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +31,15 @@ class PersonCardView extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (onShowInGraph != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: onShowInGraph,
+                  icon: const Icon(Icons.hub_outlined, size: 18),
+                  label: const Text('Vedi nel grafo'),
+                ),
+              ),
             _Header(person: person),
             if (person.data.isNotEmpty) ...[
               const SizedBox(height: 20),

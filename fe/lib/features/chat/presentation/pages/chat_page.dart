@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../graph/presentation/pages/graph_page.dart';
 import '../../../person/presentation/widgets/person_card_view.dart';
 import '../bloc/chat_bloc.dart';
 import '../widgets/voice_blob.dart';
@@ -98,7 +99,9 @@ class _ChatViewState extends State<_ChatView> {
           if ((d.primaryVelocity ?? 0) < -100) _openKeyboard();
         },
         child: SafeArea(
-        child: BlocConsumer<ChatBloc, ChatState>(
+        child: Stack(
+          children: [
+        BlocConsumer<ChatBloc, ChatState>(
           listenWhen: (p, c) =>
               p.errorMessage != c.errorMessage && c.errorMessage != null,
           listener: (context, state) {
@@ -157,11 +160,26 @@ class _ChatViewState extends State<_ChatView> {
             );
           },
         ),
+            // Accesso allo Spazio (grafo). Nascosto a tastiera aperta per non
+            // disturbare il composer.
+            if (!keyboardOpen)
+              Positioned(
+                top: 4,
+                right: 8,
+                child: IconButton(
+                  tooltip: 'Spazio',
+                  icon: const Icon(Icons.hub_outlined, color: AppColors.textSecondary),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const GraphPage()),
+                  ),
+                ),
+              ),
+          ],
+        ),
         ),
       ),
     );
   }
-
 }
 
 /// Gesture SUL BLOB: tap (apri tastiera) e press-and-hold (registra). Lo swipe-up
@@ -407,7 +425,14 @@ class _Body extends StatelessWidget {
     }
     final person = state.activePerson;
     if (person != null) {
-      return PersonCardView(person: person);
+      return PersonCardView(
+        person: person,
+        onShowInGraph: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => GraphPage(highlightIds: {person.id}),
+          ),
+        ),
+      );
     }
     return _Empty(state: state);
   }
