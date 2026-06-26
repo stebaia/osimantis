@@ -44,6 +44,43 @@ func TestGeminiChatTextResponse(t *testing.T) {
 	}
 }
 
+// Il turno RoleSystem deve essere instradato nel canale systemInstruction di
+// Gemini (istruzione forte e persistente), NON come un normale messaggio user
+// nello storico, dove si diluirebbe dopo qualche giro di tool.
+func TestGeminiSystemPromptGoesToSystemInstruction(t *testing.T) {
+	var captured geminiRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+	}))
+	defer srv.Close()
+
+	g := NewGemini("k", WithBaseURL(srv.URL))
+	history := []Turn{
+		{Role: RoleSystem, Text: "SEI L'ASSISTENTE"},
+		{Role: RoleUser, Text: "ciao"},
+	}
+	if _, err := g.Chat(context.Background(), history, nil); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	if captured.SystemInstruction == nil {
+		t.Fatal("systemInstruction non impostata")
+	}
+	if got := captured.SystemInstruction.Parts[0].Text; got != "SEI L'ASSISTENTE" {
+		t.Errorf("systemInstruction = %q", got)
+	}
+	// Il system prompt NON deve comparire tra i contents: lì resta solo l'utente.
+	if len(captured.Contents) != 1 {
+		t.Fatalf("attesi 1 contents (solo user), %d: %+v", len(captured.Contents), captured.Contents)
+	}
+	if captured.Contents[0].Role != "user" || captured.Contents[0].Parts[0].Text != "ciao" {
+		t.Errorf("contents[0] = %+v", captured.Contents[0])
+	}
+}
+
 func TestGeminiChatFunctionCall(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verifica che i toolDefs vengano inviati.

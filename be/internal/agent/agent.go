@@ -43,7 +43,7 @@ type ToolExecutor interface {
 // l'agente vede solo system prompt + messaggio corrente.
 func RunAgent(ctx context.Context, client llm.LLM, exec ToolExecutor, toolDefs []map[string]any, userText string, prior []llm.Turn) (string, error) {
 	history := make([]llm.Turn, 0, len(prior)+2)
-	history = append(history, llm.Turn{Role: llm.RoleUser, Text: SystemPrompt})
+	history = append(history, llm.Turn{Role: llm.RoleSystem, Text: SystemPrompt})
 	history = append(history, prior...)
 	history = append(history, llm.Turn{Role: llm.RoleUser, Text: userText})
 

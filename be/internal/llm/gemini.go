@@ -69,10 +69,11 @@ func (g *Gemini) Chat(ctx context.Context, history []Turn, toolDefs []map[string
 	return g.parseResponse(resp)
 }
 
-// buildRequest mappa i Turn neutri nel formato Gemini. Il primo Turn con
-// role=user che funge da system prompt viene passato come systemInstruction se
-// l'agente lo marca; qui trattiamo lo storico in modo uniforme e lasciamo che il
-// system prompt sia il primo messaggio user (Gemini lo accetta).
+// buildRequest mappa i Turn neutri nel formato Gemini. Il Turn con role=system
+// viene instradato nel canale dedicato systemInstruction, che Gemini tratta come
+// istruzione forte e persistente: le regole (es. creazione proattiva) non si
+// diluiscono dopo qualche giro di tool, come accadeva quando il prompt era un
+// normale messaggio user nello storico.
 func (g *Gemini) buildRequest(history []Turn, toolDefs []map[string]any) geminiRequest {
 	req := geminiRequest{}
 	if len(toolDefs) > 0 {
@@ -81,6 +82,13 @@ func (g *Gemini) buildRequest(history []Turn, toolDefs []map[string]any) geminiR
 
 	for _, t := range history {
 		switch t.Role {
+		case RoleSystem:
+			// systemInstruction è single-shot: se per qualche motivo arrivassero più
+			// turni system, l'ultimo vince (gli altri sono ignorati). In pratica ce
+			// n'è sempre uno solo, in testa.
+			req.SystemInstruction = &geminiContent{
+				Parts: []geminiPart{{Text: t.Text}},
+			}
 		case RoleUser:
 			req.Contents = append(req.Contents, geminiContent{
 				Role:  "user",

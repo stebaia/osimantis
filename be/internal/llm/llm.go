@@ -12,9 +12,10 @@ import "context"
 type Role string
 
 const (
-	RoleUser  Role = "user"  // messaggio dell'utente
-	RoleModel Role = "model" // risposta del modello
-	RoleTool  Role = "tool"  // risultato di un tool re-iniettato nel contesto
+	RoleSystem Role = "system" // istruzioni di sistema (system prompt)
+	RoleUser   Role = "user"   // messaggio dell'utente
+	RoleModel  Role = "model"  // risposta del modello
+	RoleTool   Role = "tool"   // risultato di un tool re-iniettato nel contesto
 )
 
 // ToolCall è una richiesta del modello di invocare un tool, con i suoi argomenti.
