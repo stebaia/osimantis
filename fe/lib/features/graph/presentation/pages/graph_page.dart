@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/error/result.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../person/domain/usecases/get_person.dart';
+import '../../../person/presentation/widgets/person_card_view.dart';
 import '../../domain/entities/graph_data.dart';
 import '../bloc/graph_bloc.dart';
 import '../layout/force_directed_layout.dart';
@@ -80,31 +83,91 @@ class _GraphCanvas extends StatelessWidget {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         final positions = forceDirectedLayout(graph, size);
 
-        return Stack(
-          children: [
-            // Archi (linee) sotto i nodi.
-            Positioned.fill(
-              child: CustomPaint(
-                painter: GraphEdgesPainter(
-                  edges: graph.edges,
-                  positions: positions,
-                ),
-              ),
-            ),
-            // Nodi: chip centrati sulla loro posizione.
-            for (final node in graph.nodes)
-              if (positions[node.id] case final p?)
-                Positioned(
-                  left: p.dx,
-                  top: p.dy,
-                  child: FractionalTranslation(
-                    translation: const Offset(-0.5, -0.5),
-                    child: NodeChip(node: node, onTap: () {}),
+        // Pan + zoom nativi attorno al canvas. boundaryMargin generoso così si
+        // può trascinare anche oltre i bordi senza incastrarsi.
+        return InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 3.0,
+          boundaryMargin: const EdgeInsets.all(200),
+          constrained: false,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: Stack(
+              children: [
+                // Archi (linee) sotto i nodi.
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: GraphEdgesPainter(
+                      edges: graph.edges,
+                      positions: positions,
+                    ),
                   ),
                 ),
-          ],
+                // Nodi: chip centrati sulla loro posizione. Tap su una PERSONA
+                // apre la sua scheda; i luoghi non hanno scheda → no-op.
+                for (final node in graph.nodes)
+                  if (positions[node.id] case final p?)
+                    Positioned(
+                      left: p.dx,
+                      top: p.dy,
+                      child: FractionalTranslation(
+                        translation: const Offset(-0.5, -0.5),
+                        child: NodeChip(
+                          node: node,
+                          onTap: node.isPerson
+                              ? () => _openPersonCard(context, node.id)
+                              : () {},
+                        ),
+                      ),
+                    ),
+              ],
+            ),
+          ),
         );
       },
+    );
+  }
+}
+
+/// Apre la scheda della persona [id] in un bottom sheet, caricandola via il
+/// usecase GetPerson esistente (riuso di PersonCardView, nessuna nuova UI).
+void _openPersonCard(BuildContext context, int id) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: AppColors.background,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _PersonCardSheet(personId: id),
+  );
+}
+
+class _PersonCardSheet extends StatelessWidget {
+  const _PersonCardSheet({required this.personId});
+  final int personId;
+
+  @override
+  Widget build(BuildContext context) {
+    return FractionallySizedBox(
+      heightFactor: 0.85,
+      child: FutureBuilder<Result>(
+        future: sl<GetPerson>().call(personId),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final result = snapshot.data!;
+          return switch (result) {
+            Success(:final data) => PersonCardView(person: data),
+            Error(:final failure) => Center(
+                child: Text(
+                  failure.message,
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+          };
+        },
+      ),
     );
   }
 }
